@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "dotenv/config";
 import { Command } from "commander";
 import { runInit } from "./commands/init.js";
 import { runScan } from "./commands/scan.js";
@@ -62,4 +63,21 @@ program
     await runDoctor();
   });
 
-program.parseAsync(process.argv);
+async function main(): Promise<void> {
+  try {
+    await program.parseAsync(process.argv);
+  } finally {
+    // A live mongoose connection keeps the event loop alive, which would
+    // hang `git push` forever. Tear it down (no-op if never connected) and
+    // hard-exit with whatever exit code the command set as a backstop.
+    try {
+      const { disconnectMongo } = await import("./audit/mongo.js");
+      await disconnectMongo();
+    } catch {
+      // Never let teardown failure change the command's outcome.
+    }
+    process.exit(process.exitCode ?? 0);
+  }
+}
+
+void main();

@@ -35,6 +35,13 @@ type EffectiveConfig = {
 
 const DEFAULT_BLOCK_ON: Severity[] = ["critical", "high"];
 
+const SEVERITY_RANK: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+
+/** Returns the higher of two severities (AI enrichment can never downgrade). */
+function maxSeverity(a: Severity, b: Severity): Severity {
+  return SEVERITY_RANK[b] > SEVERITY_RANK[a] ? b : a;
+}
+
 /**
  * `custos scan` — orchestrates the full core loop (AGENTS.md "custos scan"):
  * extract diff → parse into DiffHunk[] → run scanner rules → render
@@ -486,7 +493,9 @@ async function enrichFindings(findings: Finding[], hunks: DiffHunk[]): Promise<F
         const result = await explainFinding(finding, hunk);
         enriched.push({
           ...finding,
-          severity: result.risk,
+          // AI may raise severity but never lower it — a downgrade must not
+          // be able to flip a rule's critical finding into an allowed push.
+          severity: maxSeverity(finding.severity, result.risk),
           explanation: result.summary,
           recommendation: result.recommendation,
           source: "hybrid",
@@ -514,12 +523,19 @@ async function tryOverride(
   finding: Finding,
   reason: string,
   commitSha: string | undefined,
-): Promise<{ success: boolean; claims: Record<string, unknown>; userEmail?: string }> {
+): Promise<{
+  success: boolean;
+  claims: Record<string, unknown>;
+  userEmail?: string;
+  context?: Record<string, unknown>;
+}> {
+  let findingContext: Record<string, unknown> | undefined;
   try {
     const { buildFindingContext } = await import("../auth/claimsBuilder.js");
     const { requestDeviceCode, pollForToken } = await import("../auth/deviceFlow.js");
 
     const context = buildFindingContext(finding, commitSha, reason);
+    findingContext = context;
     const deviceCode = await requestDeviceCode(context);
 
     console.log("");
@@ -543,14 +559,22 @@ async function tryOverride(
       const result = await pollForToken(deviceCode.device_code, deviceCode.interval);
       waiter.stop("Verified.", true);
       const email = String(result.claims["email"] ?? result.claims["https://custos/email"] ?? "");
-      return { success: true, claims: result.claims, userEmail: email || undefined };
+      return {
+        success: true,
+        // Merge the finding context under the token claims so the audit
+        // record always names the exact finding, even if Auth0 strips the
+        // custom params from the issued token.
+        claims: { ...findingContext, ...result.claims },
+        userEmail: email || undefined,
+        context: findingContext,
+      };
     } catch (err) {
       waiter.stop("Verification failed.", false);
       throw err;
     }
   } catch (err) {
     console.error(chalk.red(`[custos] Override failed: ${(err as Error).message}`));
-    return { success: false, claims: {} };
+    return { success: false, claims: {}, context: findingContext };
   }
 }
 

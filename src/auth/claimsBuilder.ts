@@ -11,16 +11,32 @@ export type FindingContext = {
 };
 
 /**
- * Builds the finding context object passed into the Auth0 device flow
- * (via state/login_hint) and later read back from decoded JWT claims.
- *
- * Not implemented yet — later phase wires this per AGENTS.md's "Auth0
- * Integration" section.
+ * Builds the namespaced finding context that is (a) passed into the Auth0
+ * device-code request so a post-login Action can embed it as JWT claims,
+ * and (b) written into the MongoDB audit record regardless of whether the
+ * claims survive the round-trip — so the ledger always names the exact
+ * finding that was overridden. Undefined optional fields are omitted so
+ * they never serialize as `undefined`.
  */
 export function buildFindingContext(
-  _finding: Finding,
-  _commitSha: string | undefined,
-  _overrideReason: string,
+  finding: Finding,
+  commitSha: string | undefined,
+  overrideReason: string,
 ): FindingContext {
-  throw new Error("buildFindingContext: not implemented");
+  const context: FindingContext = {
+    "https://custos/finding_id": finding.id,
+    "https://custos/severity": finding.severity,
+    "https://custos/rule": finding.id,
+    "https://custos/file": finding.file,
+    "https://custos/override_reason": overrideReason,
+  };
+
+  if (finding.line !== undefined) {
+    context["https://custos/line"] = finding.line;
+  }
+  if (commitSha) {
+    context["https://custos/commit_sha"] = commitSha;
+  }
+
+  return context;
 }
