@@ -7,6 +7,7 @@ import { getHookStatus, readRepoConfig, resolveRepoState } from "./repoState.js"
 const version = "0.1.0";
 const logo = chalk.whiteBright.bold;
 const label = (text: string): string => chalk.bgWhite.black.bold(` ${text} `);
+const commandRow = (command: string, description: string): string => `${chalk.white(command.padEnd(18))}${chalk.gray(description)}`;
 
 export async function runWelcome(): Promise<void> {
   const user = getDisplayName();
@@ -29,10 +30,10 @@ export async function runWelcome(): Promise<void> {
     chalk.gray(status.projectLine),
     "",
     label("Getting started"),
-    `${chalk.white("Initialize repo")}  ${chalk.gray("custos init")}`,
-    `${chalk.white("Run a scan")}       ${chalk.gray("custos scan")}`,
-    `${chalk.white("Check setup")}      ${chalk.gray("custos doctor")}`,
-    `${chalk.white("Navigate commands")} ${chalk.gray("custos select")}`,
+    commandRow("custos init", "Initialize repo"),
+    commandRow("custos scan", "Run a scan"),
+    commandRow("custos doctor", "Check setup"),
+    commandRow("custos select", "Navigate commands"),
     "",
     label("Project status"),
     `${chalk.white("Installed")}        ${status.installed}`,
@@ -49,7 +50,7 @@ export async function runWelcome(): Promise<void> {
     }),
   );
 
-  console.log(`${chalk.gray(">")} Type ${chalk.white.bold("custos select")} for a keyboard command launcher.`);
+  console.log(`${chalk.gray(">")} ${chalk.white.bold("custos select")} ${chalk.gray("Keyboard command launcher")}`);
 }
 
 async function getProjectStatus(): Promise<{

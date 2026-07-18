@@ -28,3 +28,12 @@ Each entry should include:
 - Imports/dependencies: Removed `readline` and command-runner imports from `src/commands/welcome.ts`; added `src/commands/select.ts` with Node `readline` plus existing command runner imports. No package dependencies added.
 - Verification: Ran `npm run typecheck`, reran `npm test` outside the sandbox due to `tsx` IPC restrictions, ran `npm run build`, launched linked `custos` to verify it returns immediately, and launched `custos select` in a TTY to verify the keyboard menu renders.
 - Follow-ups: If the command launcher gets more options, keep the default `custos` path non-blocking so it never captures normal shell input.
+
+## 2026-07-18 — Command-first welcome rows
+
+- Summary: Refactored the welcome screen Getting Started area so executable commands appear on the left and descriptions appear on the right for faster scanning.
+- Affected files: `src/commands/welcome.ts`, `MEMORY.md`.
+- Functionality: `custos` now displays rows like `custos init Initialize repo`, `custos scan Run a scan`, `custos doctor Check setup`, and `custos select Navigate commands`; the footer hint also leads with `custos select`.
+- Imports/dependencies: Added a local `commandRow` formatter in `src/commands/welcome.ts`; no imports or dependencies changed.
+- Verification: Pending final render/checks in this change set.
+- Follow-ups: Keep welcome rows command-first if more Getting Started commands are added.
