@@ -110,7 +110,7 @@ export async function runScan(options: ScanOptions): Promise<void> {
       return;
     }
 
-    renderBanner();
+    await renderBanner();
 
     for (const finding of findings) {
       renderFinding(finding);
@@ -557,7 +557,7 @@ async function tryOverride(
 
     try {
       const result = await pollForToken(deviceCode.device_code, deviceCode.interval);
-      waiter.stop("Verified.", true);
+      await waiter.stop("Verified.", true);
       const email = String(result.claims["email"] ?? result.claims["https://custos/email"] ?? "");
       return {
         success: true,
@@ -569,7 +569,7 @@ async function tryOverride(
         context: findingContext,
       };
     } catch (err) {
-      waiter.stop("Verification failed.", false);
+      await waiter.stop("Verification failed.", false);
       throw err;
     }
   } catch (err) {
