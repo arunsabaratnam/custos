@@ -5,6 +5,7 @@ import { runScan } from "./commands/scan.js";
 import { runAudit } from "./commands/audit.js";
 import { runDoctor } from "./commands/doctor.js";
 import { runHelp } from "./commands/help.js";
+import { runSelect } from "./commands/select.js";
 import { runWelcome } from "./commands/welcome.js";
 
 const program = new Command();
@@ -22,6 +23,13 @@ program
   .description("show a simple guide to Custos commands")
   .action(async () => {
     await runHelp();
+  });
+
+program
+  .command("select")
+  .description("navigate executable Custos commands with the keyboard")
+  .action(async () => {
+    await runSelect();
   });
 
 program

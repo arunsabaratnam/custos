@@ -7,10 +7,11 @@ describe("custos CLI", () => {
       cwd: new URL("..", import.meta.url).pathname,
     });
 
-    expect(stdout).toContain("c u s t o s");
+    expect(stdout).toContain("██████╗██╗   ██╗███████╗████████╗ ██████╗ ███████╗");
     expect(stdout).toContain("Pre-push security before code leaves your laptop.");
     expect(stdout).toContain("Getting started");
     expect(stdout).toContain("custos init");
+    expect(stdout).toContain("custos select");
   });
 
   it("prints help output listing all commands", async () => {
@@ -19,6 +20,7 @@ describe("custos CLI", () => {
     });
 
     expect(stdout).toContain("help");
+    expect(stdout).toContain("select");
     expect(stdout).toContain("init");
     expect(stdout).toContain("scan");
     expect(stdout).toContain("audit");

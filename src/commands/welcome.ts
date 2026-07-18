@@ -5,7 +5,7 @@ import chalk from "chalk";
 import { getHookStatus, readRepoConfig, resolveRepoState } from "./repoState.js";
 
 const version = "0.1.0";
-const accent = chalk.white.bold;
+const logo = chalk.whiteBright.bold;
 const label = (text: string): string => chalk.bgWhite.black.bold(` ${text} `);
 
 export async function runWelcome(): Promise<void> {
@@ -13,7 +13,12 @@ export async function runWelcome(): Promise<void> {
   const status = await getProjectStatus();
 
   const body = [
-    accent("c u s t o s"),
+    logo(" ██████╗██╗   ██╗███████╗████████╗ ██████╗ ███████╗"),
+    logo("██╔════╝██║   ██║██╔════╝╚══██╔══╝██╔═══██╗██╔════╝"),
+    logo("██║     ██║   ██║███████╗   ██║   ██║   ██║███████╗"),
+    logo("██║     ██║   ██║╚════██║   ██║   ██║   ██║╚════██║"),
+    logo("╚██████╗╚██████╔╝███████║   ██║   ╚██████╔╝███████║"),
+    logo(" ╚═════╝ ╚═════╝ ╚══════╝   ╚═╝    ╚═════╝ ╚══════╝"),
     "",
     chalk.white.bold("Pre-push security before code leaves your laptop."),
     chalk.gray(`v${version}`),
@@ -27,6 +32,7 @@ export async function runWelcome(): Promise<void> {
     `${chalk.white("Initialize repo")}  ${chalk.gray("custos init")}`,
     `${chalk.white("Run a scan")}       ${chalk.gray("custos scan")}`,
     `${chalk.white("Check setup")}      ${chalk.gray("custos doctor")}`,
+    `${chalk.white("Navigate commands")} ${chalk.gray("custos select")}`,
     "",
     label("Project status"),
     `${chalk.white("Installed")}        ${status.installed}`,
@@ -37,12 +43,13 @@ export async function runWelcome(): Promise<void> {
   console.log(
     boxen(body, {
       borderColor: "white",
+      width: getWelcomeBoxWidth(),
       padding: { top: 2, bottom: 2, left: 3, right: 3 },
       margin: 1,
     }),
   );
 
-  console.log(`${chalk.gray(">")} Type ${chalk.white.bold("custos init")} inside a Git repo to enable pre-push protection.`);
+  console.log(`${chalk.gray(">")} Type ${chalk.white.bold("custos select")} for a keyboard command launcher.`);
 }
 
 async function getProjectStatus(): Promise<{
@@ -89,4 +96,13 @@ function formatHookStatus(status: "missing" | "installed" | "modified"): string 
     return chalk.gray("custom hook");
   }
   return chalk.gray("missing");
+}
+
+function getWelcomeBoxWidth(): number | undefined {
+  const columns = process.stdout.columns;
+  if (!columns || columns < 78) {
+    return undefined;
+  }
+
+  return Math.max(76, columns - 10);
 }

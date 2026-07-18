@@ -765,6 +765,7 @@ Avoid:
 ## Agent Collaboration Notes
 
 - Read this file before making any architectural change.
+- Maintain `MEMORY.md` at the repository root as the running implementation memory. Before creating a commit, pushing changes, or handing off work that is ready to commit, add a dated entry describing the change set: summary, affected files, functionality changed, notable imports/dependencies, test/build commands run, and follow-up context. Keep entries factual and specific enough that a future agent can reconstruct what changed without rereading the whole diff.
 - Preserve the core demo loop unless the user explicitly changes direction.
 - Never implement `src/scanner/rules.ts` logic or `src/ai/prompts.ts` content speculatively — scaffold interfaces and stubs only.
 - Keep implementation pragmatic for hackathon constraints.

@@ -22,6 +22,10 @@ const commands = [
     summary: "Emit machine-readable scan output for scripts or agents.",
   },
   {
+    name: "custos select",
+    summary: "Navigate common Custos commands with the keyboard.",
+  },
+  {
     name: "custos audit",
     summary: "Show recent security events from the MongoDB audit ledger.",
   },
