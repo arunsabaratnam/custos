@@ -5,6 +5,7 @@
     "critical",
     "high"
   ],
+  "patchFormat": "replace",
   "ai": {
     "enabled": true
   },

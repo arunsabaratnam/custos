@@ -21,6 +21,7 @@
     "commander": "^13.1.0",
     "dotenv": "^16.4.7",
     "execa": "^9.5.2",
+    "gradient-string": "^3.0.0",
     "mongoose": "^8.9.5",
     "open": "^10.1.0",
     "ora": "^8.2.0",

@@ -82,4 +82,54 @@ describe("getDiff", () => {
     expect(diff).toContain("a.txt");
     expect(diff).toContain("+line one");
   });
+
+  it("returns an empty string (no fallback) for a deleted-ref push (local sha all-zero)", async () => {
+    await commitFile(tmpDir, "a.txt", "line one\n");
+    const { stdout: remoteSha } = await execa("git", ["rev-parse", "HEAD"], { cwd: tmpDir });
+    const localAllZeroes = "0".repeat(40);
+    const stdin = `(delete) ${localAllZeroes} refs/heads/feature ${remoteSha.trim()}\n`;
+
+    const diff = await getDiff(stdin);
+
+    expect(diff).toBe("");
+  });
+
+  it("unions diffs across multiple pushed ref lines", async () => {
+    await commitFile(tmpDir, "a.txt", "line one\n");
+    const { stdout: baseSha } = await execa("git", ["rev-parse", "HEAD"], { cwd: tmpDir });
+
+    await execa("git", ["checkout", "-b", "feature-1"], { cwd: tmpDir });
+    await commitFile(tmpDir, "feature1.txt", "feature one\n");
+    const { stdout: feature1Sha } = await execa("git", ["rev-parse", "HEAD"], { cwd: tmpDir });
+
+    await execa("git", ["checkout", baseSha.trim()], { cwd: tmpDir });
+    await execa("git", ["checkout", "-b", "feature-2"], { cwd: tmpDir });
+    await commitFile(tmpDir, "feature2.txt", "feature two\n");
+    const { stdout: feature2Sha } = await execa("git", ["rev-parse", "HEAD"], { cwd: tmpDir });
+
+    const remoteAllZeroes = "0".repeat(40);
+    const stdin = [
+      `refs/heads/feature-1 ${feature1Sha.trim()} refs/heads/feature-1 ${remoteAllZeroes}`,
+      `refs/heads/feature-2 ${feature2Sha.trim()} refs/heads/feature-2 ${remoteAllZeroes}`,
+      "",
+    ].join("\n");
+
+    const diff = await getDiff(stdin);
+
+    expect(diff).toContain("feature1.txt");
+    expect(diff).toContain("feature2.txt");
+  });
+
+  it("skips malformed lines but still processes well-formed ones", async () => {
+    await commitFile(tmpDir, "a.txt", "line one\n");
+    const { stdout: localSha } = await execa("git", ["rev-parse", "HEAD"], { cwd: tmpDir });
+    const remoteAllZeroes = "0".repeat(40);
+    const stdin = ["not a valid ref line", `refs/heads/main ${localSha.trim()} refs/heads/main ${remoteAllZeroes}`].join(
+      "\n",
+    );
+
+    const diff = await getDiff(stdin);
+
+    expect(diff).toContain("a.txt");
+  });
 });

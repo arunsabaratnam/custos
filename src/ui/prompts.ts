@@ -23,6 +23,16 @@ export async function promptFindingAction(hasPatch = false): Promise<FindingActi
   return result;
 }
 
+export async function promptConfirm(message: string, initialValue = false): Promise<boolean> {
+  const result = await clack.confirm({ message, initialValue });
+
+  if (clack.isCancel(result)) {
+    return false;
+  }
+
+  return result;
+}
+
 export async function promptOverrideReason(): Promise<string> {
   const result = await clack.text({
     message: "Why are you overriding this finding? (required for audit log)",

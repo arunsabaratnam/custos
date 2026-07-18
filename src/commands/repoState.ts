@@ -2,10 +2,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { execa } from "execa";
 
+export type PatchFormat = "replace" | "diff";
+
 export type RepoConfig = {
   version: 1;
   enabled: boolean;
   blockingThreshold: string[];
+  patchFormat: PatchFormat;
   ai: {
     enabled: boolean;
   };
@@ -25,6 +28,7 @@ export const defaultRepoConfig: RepoConfig = {
   version: 1,
   enabled: true,
   blockingThreshold: ["critical", "high"],
+  patchFormat: "replace",
   ai: {
     enabled: true,
   },
