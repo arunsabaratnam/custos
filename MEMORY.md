@@ -55,3 +55,21 @@ Each entry should include:
 - Imports/dependencies: None.
 - Verification: Cloned `https://github.com/arunsabaratnam/custos-testing` as a sibling directory. Ran `npm run build` in this repo so the linked `custos` binary picked up the latest `src/` changes. In `custos-testing`: ran `custos init` (installed the pre-push hook + `.custos/config.json`), `custos scan` (clean, exit 0), committed a small demo file, and ran a real `git push origin main` — the pre-push hook fired, the animated spinner and "No security issues detected." rendered, the hook exited 0, and the push completed successfully against GitHub.
 - Follow-ups: Keep `custos-testing` as the standing sandbox for future hook verification; once `src/scanner/rules.ts` has real rules, add a vulnerable-code commit there to verify the blocking/action-menu path too, not just the clean-scan path.
+
+## 2026-07-18 — Purple accent for title and commands
+
+- Summary: Introduced the `#E0B0FF` accent color for the Custos title and executable command text while keeping supporting copy, status labels, borders, and help text white.
+- Affected files: `src/commands/welcome.ts`, `src/commands/select.ts`, `MEMORY.md`.
+- Functionality: The welcome screen logo, Getting Started commands, and footer command now render purple. The `custos select` launcher title, pointer, and command hints also use the same purple accent.
+- Imports/dependencies: Reused existing `chalk.hex("#E0B0FF")`; no imports or package dependencies changed.
+- Verification: Ran `npm run typecheck`, `npm test`, `npm run build`, rendered linked `custos` in a TTY, and launched `custos select` in a TTY to verify purple title/commands with white supporting text.
+- Follow-ups: Revisit contrast after broader theme decisions, especially if the terminal background is not dark.
+
+## 2026-07-18 — Purple border and strict welcome contrast
+
+- Summary: Tightened the welcome/select CLI theme so the welcome border is purple, all non-accent text is white, and bold styling is limited to the requested welcome copy, section headings, and white fallback status values.
+- Affected files: `src/commands/welcome.ts`, `src/commands/select.ts`, `MEMORY.md`.
+- Functionality: `custos` now renders the box border, logo, commands, footer command, and positive status values (`yes`, `enabled`, `installed`) in `#E0B0FF`. Supporting text is white; unavailable/negative statuses render bold white.
+- Imports/dependencies: Reused the existing local `accent` helper based on `chalk.hex("#E0B0FF")`; no imports or package dependencies changed.
+- Verification: Ran `npm run typecheck`, `npm test`, `npm run build`, rendered linked `custos` in a TTY, and launched `custos select` in a TTY to confirm purple border/title/commands/positive statuses with white supporting text.
+- Follow-ups: Keep this screen to a two-color palette unless the user explicitly changes the theme direction.

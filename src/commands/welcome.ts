@@ -5,29 +5,29 @@ import chalk from "chalk";
 import { getHookStatus, readRepoConfig, resolveRepoState } from "./repoState.js";
 
 const version = "0.1.0";
-const logo = chalk.whiteBright.bold;
-const label = (text: string): string => chalk.bgWhite.black.bold(` ${text} `);
-const commandRow = (command: string, description: string): string => `${chalk.white(command.padEnd(18))}${chalk.gray(description)}`;
+const accent = chalk.hex("#E0B0FF");
+const label = chalk.white.bold;
+const commandRow = (command: string, description: string): string => `${accent(command.padEnd(18))}${chalk.white(description)}`;
 
 export async function runWelcome(): Promise<void> {
   const user = getDisplayName();
   const status = await getProjectStatus();
 
   const body = [
-    logo(" ██████╗██╗   ██╗███████╗████████╗ ██████╗ ███████╗"),
-    logo("██╔════╝██║   ██║██╔════╝╚══██╔══╝██╔═══██╗██╔════╝"),
-    logo("██║     ██║   ██║███████╗   ██║   ██║   ██║███████╗"),
-    logo("██║     ██║   ██║╚════██║   ██║   ██║   ██║╚════██║"),
-    logo("╚██████╗╚██████╔╝███████║   ██║   ╚██████╔╝███████║"),
-    logo(" ╚═════╝ ╚═════╝ ╚══════╝   ╚═╝    ╚═════╝ ╚══════╝"),
+    accent(" ██████╗██╗   ██╗███████╗████████╗ ██████╗ ███████╗"),
+    accent("██╔════╝██║   ██║██╔════╝╚══██╔══╝██╔═══██╗██╔════╝"),
+    accent("██║     ██║   ██║███████╗   ██║   ██║   ██║███████╗"),
+    accent("██║     ██║   ██║╚════██║   ██║   ██║   ██║╚════██║"),
+    accent("╚██████╗╚██████╔╝███████║   ██║   ╚██████╔╝███████║"),
+    accent(" ╚═════╝ ╚═════╝ ╚══════╝   ╚═╝    ╚═════╝ ╚══════╝"),
     "",
     chalk.white.bold("Pre-push security before code leaves your laptop."),
-    chalk.gray(`v${version}`),
+    chalk.white.bold(`v${version}`),
     "",
-    chalk.bold(`Welcome back ${user}!`),
+    chalk.white.bold(`Welcome back ${user}!`),
     "",
-    chalk.gray("Local-first security before git push"),
-    chalk.gray(status.projectLine),
+    chalk.white("Local-first security before git push"),
+    chalk.white(status.projectLine),
     "",
     label("Getting started"),
     commandRow("custos init", "Initialize repo"),
@@ -43,14 +43,14 @@ export async function runWelcome(): Promise<void> {
 
   console.log(
     boxen(body, {
-      borderColor: "white",
+      borderColor: "#E0B0FF",
       width: getWelcomeBoxWidth(),
       padding: { top: 2, bottom: 2, left: 3, right: 3 },
       margin: 1,
     }),
   );
 
-  console.log(`${chalk.gray(">")} ${chalk.white.bold("custos select")} ${chalk.gray("Keyboard command launcher")}`);
+  console.log(`${chalk.white(">")} ${accent("custos select")} ${chalk.white("Keyboard command launcher")}`);
 }
 
 async function getProjectStatus(): Promise<{
@@ -67,16 +67,16 @@ async function getProjectStatus(): Promise<{
 
     return {
       projectLine: `Project: ${basename(state.repoRoot)}`,
-      installed: installed ? chalk.white("yes") : chalk.gray("no"),
-      protection: config?.enabled ? chalk.white("enabled") : chalk.gray("not initialized"),
+      installed: installed ? accent("yes") : chalk.white.bold("no"),
+      protection: config?.enabled ? accent("enabled") : chalk.white.bold("not initialized"),
       hook: formatHookStatus(hookStatus),
     };
   } catch {
     return {
       projectLine: "No Git repository detected",
-      installed: chalk.gray("no"),
-      protection: chalk.gray("not initialized"),
-      hook: chalk.gray("unavailable"),
+      installed: chalk.white.bold("no"),
+      protection: chalk.white.bold("not initialized"),
+      hook: chalk.white.bold("unavailable"),
     };
   }
 }
@@ -91,12 +91,12 @@ function getDisplayName(): string {
 
 function formatHookStatus(status: "missing" | "installed" | "modified"): string {
   if (status === "installed") {
-    return chalk.white("installed");
+    return accent("installed");
   }
   if (status === "modified") {
-    return chalk.gray("custom hook");
+    return chalk.white.bold("custom hook");
   }
-  return chalk.gray("missing");
+  return chalk.white.bold("missing");
 }
 
 function getWelcomeBoxWidth(): number | undefined {

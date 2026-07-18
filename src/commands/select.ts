@@ -8,11 +8,12 @@ import { getHookStatus, readRepoConfig, resolveRepoState } from "./repoState.js"
 import { runScan } from "./scan.js";
 
 type SelectAction = "init" | "scan" | "doctor" | "audit" | "help" | "exit";
+const accent = chalk.hex("#E0B0FF");
 
 export async function runSelect(): Promise<void> {
   if (!isInteractiveTerminal()) {
-    console.log("Select requires an interactive terminal.");
-    console.log(`Run ${chalk.white.bold("custos help")} to view available commands.`);
+    console.log(chalk.white("Select requires an interactive terminal."));
+    console.log(`Run ${accent("custos help")} to view available commands.`);
     return;
   }
 
@@ -68,13 +69,13 @@ async function promptSelectAction(initialValue: SelectAction): Promise<SelectAct
       }
 
       const lines = [
-        chalk.white.bold("custos select"),
-        chalk.gray("Use up/down arrows, then Enter:"),
+        accent("custos select"),
+        chalk.white("Use up/down arrows, then Enter:"),
         "",
         ...options.map((option, index) => {
-          const pointer = index === selectedIndex ? chalk.white.bold(">") : " ";
-          const name = index === selectedIndex ? chalk.bgWhite.black.bold(` ${option.label} `) : chalk.white(option.label);
-          const command = option.command ? `  ${chalk.gray(option.command)}` : "";
+          const pointer = index === selectedIndex ? accent(">") : " ";
+          const name = chalk.white(option.label);
+          const command = option.command ? `  ${accent(option.command)}` : "";
           return `${pointer} ${name}${command}`;
         }),
       ];
