@@ -28,11 +28,12 @@ export async function getDiff(stdin?: string): Promise<string> {
     }
   }
 
-  // Manual scan fallbacks
+  // Manual scan fallbacks. Prefer the current working tree/staged diff
+  // before falling back to committed ranges.
   for (const args of [
+    ["diff", "--unified=3", "HEAD"],
     ["diff", "--unified=3", "origin/main...HEAD"],
     ["diff", "--unified=3", "HEAD~1..HEAD"],
-    ["diff", "--unified=3", "HEAD"],
   ]) {
     try {
       const { stdout } = await execa("git", args);

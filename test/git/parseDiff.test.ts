@@ -30,8 +30,25 @@ describe("parseDiff", () => {
   it("extracts only added lines", () => {
     const hunk = parseDiff(SAMPLE_DIFF)[0]!;
     expect(hunk.addedLines).toHaveLength(2);
+    expect(hunk.addedLines[0]?.line).toBe(2);
+    expect(hunk.addedLines[1]?.line).toBe(3);
     expect(hunk.addedLines[0]?.content).toBe('const OPENAI_API_KEY = "sk-demo-leaked-key";');
     expect(hunk.addedLines[1]?.content).toBe('const DB_PASSWORD = "hunter2";');
+  });
+
+  it("tracks line numbers correctly for a new file", () => {
+    const newFileDiff = `diff --git a/demo-secret.ts b/demo-secret.ts
+new file mode 100644
+index 0000000..abc1234
+--- /dev/null
++++ b/demo-secret.ts
+@@ -0,0 +1 @@
++const OPENAI_API_KEY = "sk-demo-leaked-key";
+`;
+
+    const hunk = parseDiff(newFileDiff)[0]!;
+    expect(hunk.file).toBe("demo-secret.ts");
+    expect(hunk.addedLines[0]?.line).toBe(1);
   });
 
   it("returns empty array for empty diff", () => {

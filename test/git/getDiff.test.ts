@@ -53,6 +53,16 @@ describe("getDiff", () => {
     expect(diff).toContain("a.txt");
   });
 
+  it("prefers the current working tree diff for a manual scan", async () => {
+    await commitFile(tmpDir, "a.txt", "line one\n");
+    await fs.writeFile(path.join(tmpDir, "a.txt"), "line one\nline two\n");
+
+    const diff = await getDiff();
+
+    expect(diff).toContain("a.txt");
+    expect(diff).toContain("+line two");
+  });
+
   it("returns an empty string when there is nothing to diff", async () => {
     await commitFile(tmpDir, "a.txt", "line one\n");
 

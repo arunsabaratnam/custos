@@ -18,9 +18,21 @@ describe("custos CLI", () => {
       cwd: new URL("..", import.meta.url).pathname,
     });
 
+    expect(stdout).toContain("help");
     expect(stdout).toContain("init");
     expect(stdout).toContain("scan");
     expect(stdout).toContain("audit");
     expect(stdout).toContain("doctor");
+  });
+
+  it("prints a simple command guide with the help command", async () => {
+    const { stdout } = await execa("npx", ["tsx", "src/cli.ts", "help"], {
+      cwd: new URL("..", import.meta.url).pathname,
+    });
+
+    expect(stdout).toContain("Custos commands");
+    expect(stdout).toContain("custos init");
+    expect(stdout).toContain("custos scan --pre-push");
+    expect(stdout).toContain("custos doctor");
   });
 });

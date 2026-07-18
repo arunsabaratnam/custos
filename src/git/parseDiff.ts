@@ -42,7 +42,9 @@ export function parseDiff(rawDiff: string): DiffHunk[] {
       const addedLines: Array<{ line: number; content: string }> = [];
       const contextLines: string[] = [];
 
-      for (const line of body.split("\n")) {
+      const normalizedBody = body.startsWith("\n") ? body.slice(1) : body;
+
+      for (const line of normalizedBody.split("\n")) {
         if (line.startsWith("+") && !line.startsWith("+++")) {
           addedLines.push({ line: lineNum, content: line.slice(1) });
           lineNum++;
