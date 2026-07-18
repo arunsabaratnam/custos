@@ -1,0 +1,42 @@
+{
+  "name": "custos",
+  "version": "0.1.0",
+  "description": "Terminal-native, local-first developer security sidekick",
+  "type": "module",
+  "bin": {
+    "custos": "./dist/cli.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/cli.js",
+    "lint": "eslint src test",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.9.1",
+    "boxen": "^8.0.1",
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0",
+    "dotenv": "^16.4.7",
+    "execa": "^9.5.2",
+    "mongoose": "^8.9.5",
+    "open": "^10.1.0",
+    "ora": "^8.2.0",
+    "simple-git": "^3.27.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "@typescript-eslint/eslint-plugin": "^8.20.0",
+    "@typescript-eslint/parser": "^8.20.0",
+    "eslint": "^9.18.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
