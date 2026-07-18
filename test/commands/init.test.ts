@@ -75,4 +75,22 @@ describe("runInit", () => {
     const count = (content.match(/custos scan --pre-push/g) ?? []).length;
     expect(count).toBe(1);
   });
+
+  it("explains that Git must be initialized before custos init", async () => {
+    const nonRepoDir = await fs.mkdtemp(path.join(os.tmpdir(), "custos-non-repo-test-"));
+
+    try {
+      const result = await execa(tsxBin, [cliPath, "init"], {
+        cwd: nonRepoDir,
+        reject: false,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("This folder is not a Git repository yet.");
+      expect(result.stderr).toContain("git init");
+      expect(result.stderr).toContain("custos init");
+    } finally {
+      await fs.rm(nonRepoDir, { recursive: true, force: true });
+    }
+  });
 });
