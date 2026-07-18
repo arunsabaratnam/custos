@@ -132,7 +132,7 @@ runDoctor(): Promise<void>
   - `getDiff(stdin?: string): Promise<string>` — reads stdin refs in pre-push mode, falls back to git diff commands
   - `parseDiff(rawDiff: string): DiffHunk[]` — unified diff → structured hunks
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `test/git/parseDiff.test.ts`:
 ```ts
@@ -191,7 +191,7 @@ index abc..def 100644
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 npm test -- test/git/parseDiff.test.ts
@@ -199,7 +199,7 @@ npm test -- test/git/parseDiff.test.ts
 
 Expected: FAIL — `parseDiff: not implemented`
 
-- [ ] **Step 3: Implement src/git/parseDiff.ts**
+- [x] **Step 3: Implement src/git/parseDiff.ts**
 
 ```ts
 import path from "path";
@@ -273,7 +273,7 @@ export function parseDiff(rawDiff: string): DiffHunk[] {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 npm test -- test/git/parseDiff.test.ts
@@ -281,7 +281,7 @@ npm test -- test/git/parseDiff.test.ts
 
 Expected: PASS (6 tests)
 
-- [ ] **Step 5: Implement src/git/getDiff.ts**
+- [x] **Step 5: Implement src/git/getDiff.ts**
 
 ```ts
 import { execa } from "execa";
@@ -327,7 +327,7 @@ export async function getDiff(stdin?: string): Promise<string> {
 }
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/git/getDiff.ts src/git/parseDiff.ts test/git/parseDiff.test.ts
@@ -657,7 +657,7 @@ npm test -- test/commands/init.test.ts
 
 Expected: PASS (4 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/commands/init.ts test/commands/init.test.ts
