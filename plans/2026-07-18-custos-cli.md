@@ -350,7 +350,7 @@ git commit -m "feat: implement git diff extraction and parser"
   - `promptFindingAction(): Promise<FindingAction>` — note: no finding argument (matches existing stub signature)
   - `promptOverrideReason(): Promise<string>`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `test/ui/renderFinding.test.ts`:
 ```ts
@@ -394,7 +394,7 @@ npm test -- test/ui/renderFinding.test.ts
 
 Expected: FAIL — `renderFinding: not implemented`
 
-- [ ] **Step 3: Implement src/ui/renderFinding.ts**
+- [x] **Step 3: Implement src/ui/renderFinding.ts**
 
 ```ts
 import boxen from "boxen";
@@ -428,7 +428,7 @@ export function renderFinding(finding: Finding): void {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 npm test -- test/ui/renderFinding.test.ts
@@ -436,7 +436,7 @@ npm test -- test/ui/renderFinding.test.ts
 
 Expected: PASS (2 tests)
 
-- [ ] **Step 5: Implement src/ui/prompts.ts**
+- [x] **Step 5: Implement src/ui/prompts.ts**
 
 ```ts
 import * as clack from "@clack/prompts";
@@ -472,7 +472,7 @@ export async function promptOverrideReason(): Promise<string> {
 
 Note: `promptFindingAction` takes a `hasPatch: boolean` parameter — callers pass whether a patch is available, which controls whether the "Apply patch" option appears.
 
-- [ ] **Step 6: Smoke-test rendering manually**
+- [x] **Step 6: Smoke-test rendering manually**
 
 Create a temporary file at the project root `smoke.ts`:
 
@@ -518,7 +518,7 @@ git commit -m "feat: implement terminal UI — finding renderer and action promp
 **Interfaces:**
 - Produces: `runInit(): Promise<void>`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `test/commands/init.test.ts`:
 ```ts
@@ -593,7 +593,7 @@ npm test -- test/commands/init.test.ts
 
 Expected: FAIL — init prints "not implemented yet"
 
-- [ ] **Step 3: Implement src/commands/init.ts**
+- [x] **Step 3: Implement src/commands/init.ts**
 
 ```ts
 import { execa } from "execa";
@@ -649,7 +649,7 @@ export async function runInit(): Promise<void> {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 npm test -- test/commands/init.test.ts

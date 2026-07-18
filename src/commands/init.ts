@@ -1,14 +1,24 @@
-/**
- * `custos init` — installs Custos into the current Git repository.
- *
- * Not implemented yet. Future behavior (AGENTS.md "custos init"):
- * verify inside a Git repo, ensure .git/hooks exists, write/update
- * .git/hooks/pre-push to call `custos scan --pre-push`, preserve existing
- * hook content, make it executable, print what was installed.
- *
- * IMPORTANT: the pre-push hook must never be installed or enabled by this
- * stub. That wiring is deferred to a later phase.
- */
+import { chmod } from "node:fs/promises";
+import chalk from "chalk";
+import { defaultRepoConfig, installPrePushHook, readRepoConfig, resolveRepoState, writeRepoConfig } from "./repoState.js";
+
 export async function runInit(): Promise<void> {
-  console.log("custos init: not implemented yet.");
+  try {
+    const state = await resolveRepoState();
+    const hookAction = await installPrePushHook(state.hookPath);
+    await chmod(state.hookPath, 0o755);
+    const currentConfig = (await readRepoConfig(state.configPath)) ?? defaultRepoConfig;
+    await writeRepoConfig(state.configPath, { ...currentConfig, enabled: true });
+
+    console.log(chalk.green("Custos installed for this repository."));
+    console.log(`Config: ${state.configPath}`);
+    console.log(`Pre-push hook: ${state.hookPath} (${hookAction})`);
+    console.log("Protection: enabled");
+    console.log("");
+    console.log("Run `custos` any time to see the welcome screen and setup status.");
+  } catch (error) {
+    console.error(chalk.red("Custos init failed."));
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
 }
