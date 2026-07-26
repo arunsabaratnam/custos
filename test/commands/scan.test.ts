@@ -15,6 +15,7 @@ vi.mock("../../src/scanner/scanDiff.js", () => ({
 
 vi.mock("../../src/ui/prompts.js", () => ({
   promptFindingAction: vi.fn(),
+  promptIssueSelection: vi.fn(),
   promptConfirm: vi.fn(),
   promptOverrideReason: vi.fn(),
   promptReturnToActions: vi.fn(async () => {}),
@@ -61,7 +62,7 @@ vi.mock("../../src/commands/repoState.js", async () => {
 
 const { getDiff } = await import("../../src/git/getDiff.js");
 const { scanDiff } = await import("../../src/scanner/scanDiff.js");
-const { promptFindingAction, promptConfirm, promptOverrideReason, promptReturnToActions } = await import("../../src/ui/prompts.js");
+const { promptFindingAction, promptIssueSelection, promptConfirm, promptOverrideReason, promptReturnToActions } = await import("../../src/ui/prompts.js");
 const { writeAuditEvent } = await import("../../src/audit/writeAudit.js");
 const { pollForToken, requestDeviceCode } = await import("../../src/auth/deviceFlow.js");
 const { resolveRepoState } = await import("../../src/commands/repoState.js");
@@ -95,6 +96,9 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
 let tmpDir: string;
 let originalStdin: NodeJS.ReadStream;
 let originalPrePushStdinFile: string | undefined;
+let originalAllowOverride: string | undefined;
+let originalAuth0Domain: string | undefined;
+let originalAuth0ClientId: string | undefined;
 let logSpy: ReturnType<typeof vi.spyOn>;
 let errorSpy: ReturnType<typeof vi.spyOn>;
 
@@ -102,7 +106,13 @@ beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "custos-scan-test-"));
   originalStdin = process.stdin;
   originalPrePushStdinFile = process.env.CUSTOS_PRE_PUSH_STDIN_FILE;
+  originalAllowOverride = process.env.CUSTOS_ALLOW_OVERRIDE;
+  originalAuth0Domain = process.env.AUTH0_DOMAIN;
+  originalAuth0ClientId = process.env.AUTH0_CLIENT_ID;
   delete process.env.CUSTOS_PRE_PUSH_STDIN_FILE;
+  delete process.env.CUSTOS_ALLOW_OVERRIDE;
+  delete process.env.AUTH0_DOMAIN;
+  delete process.env.AUTH0_CLIENT_ID;
   Object.defineProperty(process, "stdin", {
     configurable: true,
     value: { isTTY: true },
@@ -134,6 +144,21 @@ afterEach(async () => {
     delete process.env.CUSTOS_PRE_PUSH_STDIN_FILE;
   } else {
     process.env.CUSTOS_PRE_PUSH_STDIN_FILE = originalPrePushStdinFile;
+  }
+  if (originalAllowOverride === undefined) {
+    delete process.env.CUSTOS_ALLOW_OVERRIDE;
+  } else {
+    process.env.CUSTOS_ALLOW_OVERRIDE = originalAllowOverride;
+  }
+  if (originalAuth0Domain === undefined) {
+    delete process.env.AUTH0_DOMAIN;
+  } else {
+    process.env.AUTH0_DOMAIN = originalAuth0Domain;
+  }
+  if (originalAuth0ClientId === undefined) {
+    delete process.env.AUTH0_CLIENT_ID;
+  } else {
+    process.env.AUTH0_CLIENT_ID = originalAuth0ClientId;
   }
   process.exitCode = undefined;
   vi.resetAllMocks();
@@ -205,7 +230,7 @@ describe("runScan — blocking finding action menu", () => {
     await runScan({});
 
     expect(process.exitCode).toBe(1);
-    expect(promptFindingAction).toHaveBeenCalledWith({ hasPatch: false, mode: "manual" });
+    expect(promptFindingAction).toHaveBeenCalledWith({ hasPatch: false, mode: "manual", allowOverride: false });
     expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "finding_blocked" }));
   });
 
@@ -217,7 +242,7 @@ describe("runScan — blocking finding action menu", () => {
     await runScan({ prePush: true });
 
     expect(process.exitCode).toBe(1);
-    expect(promptFindingAction).toHaveBeenCalledWith({ hasPatch: true, mode: "pre-push" });
+    expect(promptFindingAction).toHaveBeenCalledWith({ hasPatch: true, mode: "pre-push", allowOverride: false });
   });
 
   it("returns to the action menu after viewing technical details", async () => {
@@ -231,6 +256,63 @@ describe("runScan — blocking finding action menu", () => {
     expect(promptReturnToActions).toHaveBeenCalled();
     expect(promptFindingAction).toHaveBeenCalledTimes(2);
     expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "finding_blocked" }));
+  });
+
+  it("lets the user select which issue to analyze before applying a patch", async () => {
+    const firstFinding = makeFinding({
+      file: "first.ts",
+      evidence: 'const OPENAI_API_KEY = "sk-demo-leaked-key";',
+      patch: "const OPENAI_API_KEY = process.env.OPENAI_API_KEY;",
+    });
+    const secondFinding = makeFinding({
+      id: "hardcoded-secret",
+      title: "Hardcoded credential detected",
+      file: "second.ts",
+      evidence: 'const password = "hunter2";',
+      patch: "const password = process.env.PASSWORD;",
+    });
+    await fs.writeFile(path.join(tmpDir, "first.ts"), `${firstFinding.evidence}\n`);
+    await fs.writeFile(path.join(tmpDir, "second.ts"), `${secondFinding.evidence}\n`);
+    vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
+    vi.mocked(scanDiff).mockReturnValue([firstFinding, secondFinding]);
+    vi.mocked(promptIssueSelection).mockResolvedValue(1);
+    vi.mocked(promptFindingAction).mockResolvedValue("apply-patch");
+    vi.mocked(promptConfirm).mockResolvedValue(true);
+
+    await runScan({});
+
+    expect(promptIssueSelection).toHaveBeenCalledWith([firstFinding, secondFinding], { mode: "manual" });
+    expect(promptFindingAction).toHaveBeenCalledWith({
+      hasPatch: true,
+      mode: "manual",
+      allowOverride: false,
+      showBack: true,
+    });
+    await expect(fs.readFile(path.join(tmpDir, "first.ts"), "utf8")).resolves.toContain("sk-demo-leaked-key");
+    await expect(fs.readFile(path.join(tmpDir, "second.ts"), "utf8")).resolves.toContain("process.env.PASSWORD");
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("returns from an issue action menu back to the issue list", async () => {
+    const findings = [
+      makeFinding({ file: "first.ts" }),
+      makeFinding({ id: "dangerous-exec", title: "Command injection via child_process.exec", file: "second.ts" }),
+    ];
+    vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
+    vi.mocked(scanDiff).mockReturnValue(findings);
+    vi.mocked(promptIssueSelection).mockResolvedValueOnce(0).mockResolvedValueOnce("abort");
+    vi.mocked(promptFindingAction).mockResolvedValueOnce("back");
+
+    await runScan({});
+
+    expect(promptIssueSelection).toHaveBeenCalledTimes(2);
+    expect(promptFindingAction).toHaveBeenCalledWith({
+      hasPatch: false,
+      mode: "manual",
+      allowOverride: false,
+      showBack: true,
+    });
+    expect(process.exitCode).toBe(1);
   });
 });
 
@@ -256,18 +338,19 @@ describe("runScan — apply patch", () => {
     expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "patch_applied" }));
   });
 
-  it("does not modify the file when the user rejects the patch preview", async () => {
+  it("returns to the action menu when the user rejects the patch preview", async () => {
     await writeVulnerableFile();
     vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
     vi.mocked(scanDiff).mockReturnValue([
       makeFinding({ patch: "const OPENAI_API_KEY = process.env.OPENAI_API_KEY;" }),
     ]);
-    vi.mocked(promptFindingAction).mockResolvedValue("apply-patch");
+    vi.mocked(promptFindingAction).mockResolvedValueOnce("apply-patch").mockResolvedValueOnce("abort");
     vi.mocked(promptConfirm).mockResolvedValue(false);
 
     await runScan({});
 
     expect(process.exitCode).toBe(1);
+    expect(promptFindingAction).toHaveBeenCalledTimes(2);
     const content = await fs.readFile(path.join(tmpDir, "vulnerable.ts"), "utf8");
     expect(content).toContain("sk-demo-leaked-key");
   });
@@ -305,6 +388,46 @@ describe("runScan — apply patch", () => {
 });
 
 describe("runScan — Auth0 override", () => {
+  beforeEach(() => {
+    process.env.CUSTOS_ALLOW_OVERRIDE = "true";
+    process.env.AUTH0_DOMAIN = "example.auth0.com";
+    process.env.AUTH0_CLIENT_ID = "client-id";
+  });
+
+  it("does not offer Auth0 override when override is disabled", async () => {
+    delete process.env.CUSTOS_ALLOW_OVERRIDE;
+    vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
+    vi.mocked(scanDiff).mockReturnValue([makeFinding()]);
+    vi.mocked(promptFindingAction).mockResolvedValue("abort");
+
+    await runScan({});
+
+    expect(promptFindingAction).toHaveBeenCalledWith({ hasPatch: false, mode: "manual", allowOverride: false });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("hides Auth0 override during manual scan even when override is configured", async () => {
+    vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
+    vi.mocked(scanDiff).mockReturnValue([makeFinding()]);
+    vi.mocked(promptFindingAction).mockResolvedValue("abort");
+
+    await runScan({});
+
+    expect(promptFindingAction).toHaveBeenCalledWith({ hasPatch: false, mode: "manual", allowOverride: false });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("allows env to enable Auth0 override during pre-push scans", async () => {
+    vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
+    vi.mocked(scanDiff).mockReturnValue([makeFinding()]);
+    vi.mocked(promptFindingAction).mockResolvedValue("abort");
+
+    await runScan({ prePush: true });
+
+    expect(promptFindingAction).toHaveBeenCalledWith({ hasPatch: false, mode: "pre-push", allowOverride: true });
+    expect(process.exitCode).toBe(1);
+  });
+
   it("allows the push when the override succeeds and the audit write succeeds", async () => {
     vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
     vi.mocked(scanDiff).mockReturnValue([makeFinding()]);
@@ -315,7 +438,7 @@ describe("runScan — Auth0 override", () => {
       claims: { email: "dev@example.com" },
     });
 
-    await runScan({});
+    await runScan({ prePush: true });
 
     expect(process.exitCode).toBe(0);
     expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "override_approved" }));
@@ -328,7 +451,7 @@ describe("runScan — Auth0 override", () => {
     vi.mocked(promptOverrideReason).mockResolvedValue("hotfix");
     vi.mocked(pollForToken).mockRejectedValue(new Error("expired_token"));
 
-    await runScan({});
+    await runScan({ prePush: true });
 
     expect(process.exitCode).toBe(1);
     expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "override_denied" }));
@@ -343,7 +466,7 @@ describe("runScan — Auth0 override", () => {
     vi.mocked(writeAuditEvent).mockRejectedValue(new Error("Mongo unavailable"));
     vi.mocked(promptConfirm).mockResolvedValue(false);
 
-    await runScan({});
+    await runScan({ prePush: true });
 
     expect(process.exitCode).toBe(1);
     expect(promptConfirm).toHaveBeenCalledWith(expect.stringContaining("will not be logged"), false);
@@ -358,7 +481,7 @@ describe("runScan — Auth0 override", () => {
     vi.mocked(writeAuditEvent).mockRejectedValue(new Error("Mongo unavailable"));
     vi.mocked(promptConfirm).mockResolvedValue(true);
 
-    await runScan({});
+    await runScan({ prePush: true });
 
     expect(process.exitCode).toBe(0);
   });

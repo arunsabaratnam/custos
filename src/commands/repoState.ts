@@ -15,6 +15,10 @@ export type RepoConfig = {
   audit: {
     enabled: boolean;
   };
+  auth: {
+    enabled: boolean;
+    provider: "auth0";
+  };
 };
 
 export type RepoState = {
@@ -34,6 +38,10 @@ export const defaultRepoConfig: RepoConfig = {
   },
   audit: {
     enabled: true,
+  },
+  auth: {
+    enabled: false,
+    provider: "auth0",
   },
 };
 
@@ -93,6 +101,10 @@ export async function readRepoConfig(configPath: string): Promise<RepoConfig | n
       audit: {
         ...defaultRepoConfig.audit,
         ...parsed.audit,
+      },
+      auth: {
+        ...defaultRepoConfig.auth,
+        ...parsed.auth,
       },
     };
   } catch (error) {

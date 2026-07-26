@@ -11,5 +11,9 @@
   },
   "audit": {
     "enabled": true
+  },
+  "auth": {
+    "enabled": false,
+    "provider": "auth0"
   }
 }

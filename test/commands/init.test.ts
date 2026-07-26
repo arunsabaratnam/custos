@@ -53,8 +53,12 @@ describe("runInit", () => {
     await runInit(tmpDir);
 
     const configPath = path.join(tmpDir, ".custos", "config.json");
-    const content = JSON.parse(await fs.readFile(configPath, "utf8")) as { enabled?: boolean };
+    const content = JSON.parse(await fs.readFile(configPath, "utf8")) as {
+      enabled?: boolean;
+      auth?: { enabled?: boolean; provider?: string };
+    };
     expect(content.enabled).toBe(true);
+    expect(content.auth).toEqual({ enabled: false, provider: "auth0" });
   });
 
   it("preserves existing hook content when custos block is not yet present", async () => {

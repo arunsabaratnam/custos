@@ -27,6 +27,8 @@ type EffectiveConfig = {
   blockOn: Severity[];
   aiEnabled: boolean;
   auditEnabled: boolean;
+  authEnabled: boolean;
+  allowOverride: boolean;
   patchFormat: PatchFormat;
   repoRoot: string | null;
 };
@@ -172,43 +174,83 @@ async function resolveBlockingFindings(
   commitSha: string | undefined,
   prePush: boolean,
 ): Promise<void> {
-  for (const finding of blocking) {
-    for (;;) {
-      const { promptFindingAction, promptReturnToActions } = await import("../ui/prompts.js");
-      const action = await promptFindingAction({
-        hasPatch: Boolean(finding.patch),
-        mode: prePush ? "pre-push" : "manual",
-      });
+  const mode = prePush ? "pre-push" : "manual";
 
-      if (action === "abort") {
-        await tryWriteAudit(config.auditEnabled, {
-          eventType: "finding_blocked",
-          finding,
-          action: "blocked",
-          createdAt: new Date(),
-        });
-        await promptOutro(chalk.red(prePush ? "Push aborted." : "Scan exited."));
-        process.exitCode = 1;
-        return;
-      }
+  if (blocking.length === 1) {
+    await resolveFindingActions(blocking[0]!, blocking, hunks, config, commitSha, prePush, false);
+    return;
+  }
 
-      if (action === "view-details") {
-        renderTechnicalDetails(finding);
-        await promptReturnToActions();
-        continue;
-      }
+  for (;;) {
+    const { promptIssueSelection } = await import("../ui/prompts.js");
+    const selected = await promptIssueSelection(blocking, { mode });
 
-      if (action === "apply-patch") {
-        await handleApplyPatch(finding, hunks, config);
-        return;
-      }
+    if (selected === "abort") {
+      await auditBlockedFindings(config.auditEnabled, blocking);
+      await promptOutro(chalk.red(prePush ? "Push aborted." : "Scan exited."));
+      process.exitCode = 1;
+      return;
+    }
 
-      if (action === "override") {
-        await handleOverride(finding, config, commitSha);
-        return;
-      }
+    const result = await resolveFindingActions(blocking[selected]!, blocking, hunks, config, commitSha, prePush, true);
+    if (result === "terminal") {
+      return;
     }
   }
+}
+
+async function resolveFindingActions(
+  finding: Finding,
+  allBlocking: Finding[],
+  hunks: DiffHunk[],
+  config: EffectiveConfig,
+  commitSha: string | undefined,
+  prePush: boolean,
+  showBack: boolean,
+): Promise<"terminal" | "back"> {
+  for (;;) {
+    const { promptFindingAction, promptReturnToActions } = await import("../ui/prompts.js");
+    const action = await promptFindingAction({
+      hasPatch: canApplyPatch(finding, hunks, config),
+      mode: prePush ? "pre-push" : "manual",
+      allowOverride: prePush && config.allowOverride,
+      ...(showBack ? { showBack } : {}),
+    });
+
+    if (action === "back") {
+      return "back";
+    }
+
+    if (action === "abort") {
+      await auditBlockedFindings(config.auditEnabled, showBack ? allBlocking : [finding]);
+      await promptOutro(chalk.red(prePush ? "Push aborted." : "Scan exited."));
+      process.exitCode = 1;
+      return "terminal";
+    }
+
+    if (action === "view-details") {
+      renderTechnicalDetails(finding);
+      await promptReturnToActions();
+      continue;
+    }
+
+    if (action === "apply-patch") {
+      const result = await handleApplyPatch(finding, hunks, config);
+      if (result === "continue") {
+        continue;
+      }
+      return "terminal";
+    }
+
+    if (action === "override") {
+      await handleOverride(finding, config, commitSha);
+      return "terminal";
+    }
+  }
+}
+
+function canApplyPatch(finding: Finding, hunks: DiffHunk[], config: EffectiveConfig): boolean {
+  return Boolean(finding.patch) || (config.aiEnabled && hunks.some((hunk) => hunk.file === finding.file));
 }
 
 function renderTechnicalDetails(finding: Finding): void {
@@ -234,7 +276,7 @@ async function handleApplyPatch(
   finding: Finding,
   hunks: DiffHunk[],
   config: EffectiveConfig,
-): Promise<void> {
+): Promise<"done" | "continue"> {
   const hunk = hunks.find((h) => h.file === finding.file);
   let patch = finding.patch;
 
@@ -260,7 +302,7 @@ async function handleApplyPatch(
       createdAt: new Date(),
     });
     process.exitCode = 1;
-    return;
+    return "done";
   }
 
   if (config.patchFormat === "diff") {
@@ -278,14 +320,8 @@ async function handleApplyPatch(
   const { promptConfirm } = await import("../ui/prompts.js");
   const confirmed = await promptConfirm("Apply this patch to the file?", false);
   if (!confirmed) {
-    await tryWriteAudit(config.auditEnabled, {
-      eventType: "finding_blocked",
-      finding,
-      action: "blocked",
-      createdAt: new Date(),
-    });
-    process.exitCode = 1;
-    return;
+    console.log(chalk.dim("Patch skipped."));
+    return "continue";
   }
 
   try {
@@ -301,7 +337,7 @@ async function handleApplyPatch(
       createdAt: new Date(),
     });
     process.exitCode = 1;
-    return;
+    return "done";
   }
 
   await tryWriteAudit(config.auditEnabled, {
@@ -314,6 +350,7 @@ async function handleApplyPatch(
   await promptOutro(chalk.green("Patch applied. Review the change, stage it, commit, and push again."));
   // Custos never lets a patched file ride through on the same push.
   process.exitCode = 1;
+  return "done";
 }
 
 async function handleOverride(
@@ -321,6 +358,12 @@ async function handleOverride(
   config: EffectiveConfig,
   commitSha: string | undefined,
 ): Promise<void> {
+  if (!config.allowOverride) {
+    await promptOutro(chalk.red("Auth0 override is not enabled or configured. Push blocked."));
+    process.exitCode = 1;
+    return;
+  }
+
   const { promptConfirm, promptOverrideReason } = await import("../ui/prompts.js");
   const reason = await promptOverrideReason();
   if (!reason) {
@@ -386,10 +429,13 @@ async function resolveEffectiveConfig(): Promise<EffectiveConfig> {
     const fileConfig = await readRepoConfig(state.configPath);
 
     if (fileConfig) {
+      const authEnabled = fileConfig.auth.enabled || parseBooleanEnv(process.env.CUSTOS_ALLOW_OVERRIDE, false);
       return {
         blockOn: fileConfig.blockingThreshold as Severity[],
         aiEnabled: fileConfig.ai.enabled && Boolean(process.env.BACKBOARD_API_KEY),
         auditEnabled: fileConfig.audit.enabled,
+        authEnabled,
+        allowOverride: authEnabled && hasAuth0Config(),
         patchFormat: fileConfig.patchFormat,
         repoRoot,
       };
@@ -402,6 +448,8 @@ async function resolveEffectiveConfig(): Promise<EffectiveConfig> {
     blockOn: parseBlockOnEnv(),
     aiEnabled: process.env.CUSTOS_AI_PATCHES !== "false" && Boolean(process.env.BACKBOARD_API_KEY),
     auditEnabled: process.env.CUSTOS_AUDIT_ENABLED !== "false",
+    authEnabled: parseBooleanEnv(process.env.CUSTOS_ALLOW_OVERRIDE, false),
+    allowOverride: parseBooleanEnv(process.env.CUSTOS_ALLOW_OVERRIDE, false) && hasAuth0Config(),
     patchFormat: defaultRepoConfig.patchFormat,
     repoRoot,
   };
@@ -417,6 +465,15 @@ function parseBlockOnEnv(): Severity[] {
     .filter((s): s is Severity => ["low", "medium", "high", "critical"].includes(s));
 
   return parsed.length > 0 ? parsed : DEFAULT_BLOCK_ON;
+}
+
+function parseBooleanEnv(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+function hasAuth0Config(): boolean {
+  return Boolean(process.env.AUTH0_DOMAIN && process.env.AUTH0_CLIENT_ID);
 }
 
 // ---------------------------------------------------------------------------
@@ -515,6 +572,17 @@ async function tryWriteAudit(auditEnabled: boolean, event: Record<string, unknow
   } catch (err) {
     console.error(chalk.dim(`[custos] Audit write skipped: ${(err as Error).message}`));
     return false;
+  }
+}
+
+async function auditBlockedFindings(auditEnabled: boolean, findings: Finding[]): Promise<void> {
+  for (const finding of findings) {
+    await tryWriteAudit(auditEnabled, {
+      eventType: "finding_blocked",
+      finding,
+      action: "blocked",
+      createdAt: new Date(),
+    });
   }
 }
 

@@ -127,3 +127,30 @@ Each entry should include:
 - Imports/dependencies: Reused existing `readline`, `chalk`, and shared `accent` helpers; no imports or package dependencies added.
 - Verification: Ran `npm run typecheck`, focused `npm test -- --run test/commands/audit.test.ts`, `npm run lint`, `npm run build`, and full `npm test` outside the sandbox because sandboxed `tsx` subprocess IPC failed with `listen EPERM` on `/var/folders/.../tsx-501/*.pipe`.
 - Follow-ups: Horizontal trackpad scrolling depends on terminal support for wide scrollback; this implementation avoids pager artifacts and preserves a clean table in the normal terminal buffer.
+
+## 2026-07-26 — Gate Auth0 overrides behind user config
+
+- Summary: Made Auth0 override an explicit opt-in setting and added Auth0 readiness checks to `custos doctor`.
+- Affected files: `src/commands/repoState.ts`, `src/commands/scan.ts`, `src/ui/prompts.ts`, `src/auth/deviceFlow.ts`, `src/commands/doctor.ts`, `.env.example`, `test/commands/scan.test.ts`, `test/ui/prompts.test.ts`, `test/auth/deviceFlow.test.ts`, `test/commands/init.test.ts`, `test/commands/doctor.test.ts`, `MEMORY.md`.
+- Functionality: New repo configs include `auth: { enabled: false, provider: "auth0" }`. The scan action menu only shows `Force override with Auth0` when Auth0 override is enabled and `AUTH0_DOMAIN` plus `AUTH0_CLIENT_ID` are configured. Override can be enabled through repo config or `CUSTOS_ALLOW_OVERRIDE=true`; `.env.example` keeps it disabled by default. `custos doctor` now reports whether Auth0 override is enabled, verifies required Auth0 variables only when enabled, omits optional `AUTH0_AUDIENCE` unless configured, uses purple checkmarks for passing checks, and notes that `AUTH0_CLIENT_SECRET` is not used by the CLI Device Authorization Flow. Device-code requests now send only Auth0-supported parameters (`client_id`, `scope`, optional `audience`) instead of attempting to pass finding context through unsupported fields; missing Device Code grant errors now point users to Auth0 Advanced Settings > Grant Types.
+- Imports/dependencies: Added `execa`/`chalk`/`accent` imports to `src/commands/doctor.ts`; no package dependencies added.
+- Verification: Ran `npm run typecheck`, `npm run lint`, `npm run build`, and full `npm test` outside the sandbox because sandboxed `tsx` subprocess IPC failed with `listen EPERM` on `/var/folders/.../tsx-501/*.pipe`.
+- Follow-ups: Auth0 custom JWT claims for finding context would require a separate supported handoff mechanism; current implementation stores finding context reliably in Mongo audit events and uses Auth0 tokens for identity verification.
+
+## 2026-07-26 — Keep manual scan actions non-terminal until exit
+
+- Summary: Hid Auth0 override from plain `custos scan`, kept declined patch previews inside the action menu, and made secondary prompts use the same lavender navigation styling as the main scan menu.
+- Affected files: `src/commands/scan.ts`, `src/ui/prompts.ts`, `test/commands/scan.test.ts`, `MEMORY.md`.
+- Functionality: `Force override with Auth0` is now only offered during `custos scan --pre-push` when Auth0 override is configured; manual scans cannot override because no push is being allowed. Declining `Apply suggested patch` now returns to the navigable action menu instead of ending the scan. `View technical details` still returns to the menu, and the return prompt, patch confirmation, and override reason prompt now render with the shared `#E0B0FF` rail/diamond instead of Clack's default blue markers.
+- Imports/dependencies: Removed `@clack/prompts` usage from `src/ui/prompts.ts` in favor of local `readline`-based prompt helpers; no package dependencies changed.
+- Verification: Ran `npm run typecheck`, `npm run lint`, `npm run build`, focused `npm test -- --run test/commands/scan.test.ts test/ui/prompts.test.ts`, and full `npm test` outside the sandbox because the CLI subprocess tests need `tsx` IPC pipes.
+- Follow-ups: Manual interactive visual QA in a real terminal is still useful before demo because prompt rendering depends on terminal behavior.
+
+## 2026-07-26 — Add multi-issue scan navigation
+
+- Summary: Added a first-level issue picker for scans with multiple blocking findings and clarified patch availability around deterministic and AI-generated fixes.
+- Affected files: `src/commands/scan.ts`, `src/ui/prompts.ts`, `test/commands/scan.test.ts`, `test/ui/prompts.test.ts`, `MEMORY.md`.
+- Functionality: When more than one blocking issue exists, Custos now prompts `Which issue do you want to analyze?` with severity-colored issue rows and the shared lavender navigation rail. Selecting an issue opens the existing action menu for that specific finding. The action menu includes `Back to issues` in multi-issue mode, while `Exit scan` / `Abort push` remains the only terminal quit action. Patch application now targets the selected finding's `file` and `evidence`. The patch action is available when a finding already has a deterministic patch or when Backboard AI patching is configured and a matching diff hunk exists.
+- Imports/dependencies: `src/ui/prompts.ts` now imports `Finding` for issue rendering and `severityColor` for severity-colored issue rows; no package dependencies changed.
+- Verification: Ran `npm run typecheck`, `npm run lint`, `npm run build`, focused `npm test -- --run test/commands/scan.test.ts test/ui/prompts.test.ts`, and full `npm test` outside the sandbox because sandboxed CLI subprocess tests hit `tsx` IPC `listen EPERM`.
+- Follow-ups: Manually exercise a real terminal scan with two different findings before demo to tune wording and spacing if needed.

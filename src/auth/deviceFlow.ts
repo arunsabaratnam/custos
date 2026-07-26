@@ -27,21 +27,19 @@ function requireEnv(): { domain: string; clientId: string; audience?: string } {
 }
 
 /**
- * Starts the Auth0 Device Authorization Flow. The finding context is sent
- * as extra parameters so a post-login Action can embed it as JWT claims
- * (best-effort — the Mongo audit record carries the context regardless).
+ * Starts the Auth0 Device Authorization Flow.
+ *
+ * Auth0's device-code endpoint only supports client_id, scope, and audience.
+ * Finding context is therefore kept in Custos' Mongo audit record instead of
+ * being sent to Auth0 as unsupported request parameters.
  */
-export async function requestDeviceCode(findingContext: FindingContext): Promise<DeviceCodeResponse> {
+export async function requestDeviceCode(_findingContext: FindingContext): Promise<DeviceCodeResponse> {
   const { domain, clientId, audience } = requireEnv();
 
   const form = new URLSearchParams();
   form.set("client_id", clientId);
   form.set("scope", "openid profile email");
   if (audience) form.set("audience", audience);
-  // Pass finding context through as custom params for the Auth0 Action.
-  for (const [key, value] of Object.entries(findingContext)) {
-    if (value !== undefined) form.set(key, String(value));
-  }
 
   const res = await fetch(`https://${domain}/oauth/device/code`, {
     method: "POST",
@@ -51,6 +49,11 @@ export async function requestDeviceCode(findingContext: FindingContext): Promise
 
   if (!res.ok) {
     const detail = await safeText(res);
+    if (res.status === 403 && detail.includes("unauthorized_client") && detail.includes("Grant type")) {
+      throw new Error(
+        "Auth0 Device Code grant is not enabled for this client. In Auth0 Dashboard, open Applications > Applications, select this Native application, then Advanced Settings > Grant Types, enable Device Code, and save changes.",
+      );
+    }
     throw new Error(`Auth0 device code request failed (${res.status}): ${detail}`);
   }
 
