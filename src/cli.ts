@@ -52,8 +52,12 @@ program
 program
   .command("audit")
   .description("show recent audit events from MongoDB")
-  .action(async () => {
-    await runAudit();
+  .option("-n, --limit <count>", "number of recent audit events to show", "50")
+  .option("--no-pager", "print all events without the interactive pager")
+  .option("--table", "show a compact table instead of detailed event blocks")
+  .action(async (options: { limit?: string; pager?: boolean; table?: boolean }) => {
+    const parsedLimit = options.limit ? Number.parseInt(options.limit, 10) : undefined;
+    await runAudit({ limit: parsedLimit, pager: options.pager, table: options.table });
   });
 
 program

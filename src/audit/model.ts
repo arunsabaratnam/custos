@@ -15,3 +15,7 @@ export const auditEventSchema = new Schema<AuditEvent>({
   action: { type: String, required: true },
   createdAt: { type: Date, required: true, default: Date.now },
 });
+
+auditEventSchema.index({ createdAt: -1 });
+auditEventSchema.index({ repoName: 1, branch: 1, createdAt: -1 });
+auditEventSchema.index({ eventType: 1, createdAt: -1 });

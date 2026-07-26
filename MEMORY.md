@@ -100,3 +100,30 @@ Each entry should include:
 - Imports/dependencies: No new packages. Continued use of existing `node:fs/promises`, `node:tty`, and dynamic `import("../ui/prompts.js")` / `import("@clack/prompts")`.
 - Verification: Ran `npm run typecheck`, `npm run lint`, `npm run build`, full `npm test` (68 tests), and a real PTY `git push` in a temporary `custos-testing` worktree with a vulnerable commit. Sent Down+Enter to the prompt; selection moved to `View technical details`, evidence printed, and the push was blocked with `failed to push some refs`.
 - Follow-ups: Existing repos need `custos init` once to rewrite the installed pre-push hook to the new temp-file/TTY wrapper.
+
+## 2026-07-26 — Implement MongoDB audit log viewer
+
+- Summary: Implemented `custos audit` as the terminal history view for MongoDB audit events and aligned scan audit actions with the actual allow/block decision.
+- Affected files: `src/commands/audit.ts`, `src/cli.ts`, `src/audit/model.ts`, `src/commands/scan.ts`, `test/commands/audit.test.ts`, `test/commands/scan.test.ts`, `MEMORY.md`.
+- Functionality: `custos audit` now fetches recent events from MongoDB via `listAuditEvents`, formats them newest-first in a compact git-log-style block, and uses a built-in TTY pager with `q` to quit, arrow/j/k scrolling, and page up/down. `custos audit --no-pager` prints all output directly; `--limit` controls the number of events. Audit records show commit, repo hash, branch, user, action, event type, finding details, override reason, and important Auth0/JWT claims. Warning-level findings now write audit action `allowed` instead of incorrectly recording `blocked`.
+- Imports/dependencies: Added `node:readline` usage in `src/commands/audit.ts`; no package dependencies added. Added Mongo indexes for `createdAt`, repo/branch/time, and eventType/time.
+- Verification: Ran focused `npm test -- --run test/commands/audit.test.ts test/audit/writeAudit.test.ts test/commands/scan.test.ts` and `npm run typecheck`. Live Atlas verification still requires local `.env` secrets (`MONGODB_URI`, `MONGODB_DB`, `CUSTOS_AUDIT_ENABLED`) and should not commit `.env`.
+- Follow-ups: Implement `custos doctor` MongoDB connectivity checks next, and decide whether Auth0 overrides should be hard-blocked when the Mongo audit write fails.
+
+## 2026-07-26 — Keep scan details in-flow and add audit table
+
+- Summary: Fixed the scan action menu so viewing technical details returns to the menu instead of ending the flow, and added a compact table mode for `custos audit`.
+- Affected files: `src/commands/scan.ts`, `src/ui/prompts.ts`, `src/ui/renderFinding.ts`, `src/ui/theme.ts`, `src/commands/audit.ts`, `src/cli.ts`, `test/commands/scan.test.ts`, `test/ui/prompts.test.ts`, `test/commands/audit.test.ts`, `MEMORY.md`.
+- Functionality: `View technical details` now prints rule/severity/category/source/file/evidence/recommendation/patch information, waits for the user to return, then shows the same action menu again. The custom action menu uses the welcome-screen lavender accent for its rail and active marker. Finding locations inside rendered finding boxes now use the same lavender file color. `custos audit --table` renders a horizontal table with lavender title/header/divider, white normal cells, and severity-colored priority cells; default `custos audit` remains the detailed log view.
+- Imports/dependencies: Added shared `accentHex`/`accent` exports in `src/ui/theme.ts`; no package dependencies added.
+- Verification: Ran `npm run typecheck`, `npm run lint`, `npm run build`, and focused `npm test -- --run test/ui/prompts.test.ts test/commands/scan.test.ts test/commands/audit.test.ts`.
+- Follow-ups: If the table needs live column resizing for very narrow terminals, add terminal-width-aware column sets; current table truncates long cells with an ellipsis.
+
+## 2026-07-26 — Box audit output and simplify wide tables
+
+- Summary: Refined audit rendering so regular audit entries are boxed individually and table mode stays clean without an external pager.
+- Affected files: `src/commands/audit.ts`, `test/commands/audit.test.ts`, `MEMORY.md`.
+- Functionality: Regular `custos audit` now renders each event inside its own lavender bordered block for easier scanning. `custos audit --table` keeps the wide spaced table, moves `Commit` to the leftmost column, removes the external `less` pager that produced `~` filler rows and right-edge markers, and prints with terminal line wrapping temporarily disabled so the table remains a single clean wide block.
+- Imports/dependencies: Reused existing `readline`, `chalk`, and shared `accent` helpers; no imports or package dependencies added.
+- Verification: Ran `npm run typecheck`, focused `npm test -- --run test/commands/audit.test.ts`, `npm run lint`, `npm run build`, and full `npm test` outside the sandbox because sandboxed `tsx` subprocess IPC failed with `listen EPERM` on `/var/folders/.../tsx-501/*.pipe`.
+- Follow-ups: Horizontal trackpad scrolling depends on terminal support for wide scrollback; this implementation avoids pager artifacts and preserves a clean table in the normal terminal buffer.

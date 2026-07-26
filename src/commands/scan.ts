@@ -116,7 +116,7 @@ export async function runScan(options: ScanOptions): Promise<void> {
       await tryWriteAudit(config.auditEnabled, {
         eventType: "finding_detected",
         finding,
-        action: "blocked",
+        action: config.blockOn.includes(finding.severity) ? "blocked" : "allowed",
         createdAt: new Date(),
       });
     }
@@ -173,48 +173,61 @@ async function resolveBlockingFindings(
   prePush: boolean,
 ): Promise<void> {
   for (const finding of blocking) {
-    const { promptFindingAction } = await import("../ui/prompts.js");
-    const action = await promptFindingAction({
-      hasPatch: Boolean(finding.patch),
-      mode: prePush ? "pre-push" : "manual",
-    });
-
-    if (action === "abort") {
-      await tryWriteAudit(config.auditEnabled, {
-        eventType: "finding_blocked",
-        finding,
-        action: "blocked",
-        createdAt: new Date(),
+    for (;;) {
+      const { promptFindingAction, promptReturnToActions } = await import("../ui/prompts.js");
+      const action = await promptFindingAction({
+        hasPatch: Boolean(finding.patch),
+        mode: prePush ? "pre-push" : "manual",
       });
-      await promptOutro(chalk.red(prePush ? "Push aborted." : "Scan exited."));
-      process.exitCode = 1;
-      return;
-    }
 
-    if (action === "view-details") {
-      console.log(chalk.bold("\nEvidence:"));
-      console.log(chalk.dim(finding.evidence));
-      console.log("");
-      await tryWriteAudit(config.auditEnabled, {
-        eventType: "finding_blocked",
-        finding,
-        action: "blocked",
-        createdAt: new Date(),
-      });
-      process.exitCode = 1;
-      return;
-    }
+      if (action === "abort") {
+        await tryWriteAudit(config.auditEnabled, {
+          eventType: "finding_blocked",
+          finding,
+          action: "blocked",
+          createdAt: new Date(),
+        });
+        await promptOutro(chalk.red(prePush ? "Push aborted." : "Scan exited."));
+        process.exitCode = 1;
+        return;
+      }
 
-    if (action === "apply-patch") {
-      await handleApplyPatch(finding, hunks, config);
-      return;
-    }
+      if (action === "view-details") {
+        renderTechnicalDetails(finding);
+        await promptReturnToActions();
+        continue;
+      }
 
-    if (action === "override") {
-      await handleOverride(finding, config, commitSha);
-      return;
+      if (action === "apply-patch") {
+        await handleApplyPatch(finding, hunks, config);
+        return;
+      }
+
+      if (action === "override") {
+        await handleOverride(finding, config, commitSha);
+        return;
+      }
     }
   }
+}
+
+function renderTechnicalDetails(finding: Finding): void {
+  console.log("");
+  console.log(chalk.bold("Technical details"));
+  console.log(`${chalk.bold("Rule:")} ${finding.id}`);
+  console.log(`${chalk.bold("Severity:")} ${finding.severity}`);
+  console.log(`${chalk.bold("Category:")} ${finding.category}`);
+  console.log(`${chalk.bold("Source:")} ${finding.source}`);
+  console.log(`${chalk.bold("File:")} ${finding.file}${finding.line ? `:${finding.line}` : ""}`);
+  console.log(chalk.bold("\nEvidence:"));
+  console.log(chalk.dim(finding.evidence));
+  console.log(chalk.bold("\nRecommendation:"));
+  console.log(finding.recommendation);
+  if (finding.patch) {
+    console.log(chalk.bold("\nSuggested patch:"));
+    console.log(chalk.green(finding.patch));
+  }
+  console.log("");
 }
 
 async function handleApplyPatch(

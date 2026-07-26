@@ -1,37 +1,21 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { buildFindingActionOptions } from "../../src/ui/prompts.js";
 
-vi.mock("@clack/prompts", () => ({
-  select: vi.fn(async () => "abort"),
-  confirm: vi.fn(),
-  text: vi.fn(),
-  isCancel: vi.fn(() => false),
-}));
+describe("buildFindingActionOptions", () => {
+  it("labels the abort action as Exit scan in manual mode", () => {
+    const options = buildFindingActionOptions({ mode: "manual" });
 
-const clack = await import("@clack/prompts");
-const { promptFindingAction } = await import("../../src/ui/prompts.js");
-
-afterEach(() => {
-  vi.clearAllMocks();
-});
-
-describe("promptFindingAction", () => {
-  it("labels the abort action as Exit scan in manual mode", async () => {
-    await promptFindingAction({ mode: "manual" });
-
-    expect(clack.select).toHaveBeenCalledWith(
-      expect.objectContaining({
-        options: expect.arrayContaining([expect.objectContaining({ value: "abort", label: "Exit scan" })]),
-      }),
-    );
+    expect(options).toContainEqual(expect.objectContaining({ value: "abort", label: "Exit scan" }));
   });
 
-  it("labels the abort action as Abort push in pre-push mode", async () => {
-    await promptFindingAction({ mode: "pre-push" });
+  it("labels the abort action as Abort push in pre-push mode", () => {
+    const options = buildFindingActionOptions({ mode: "pre-push" });
 
-    expect(clack.select).toHaveBeenCalledWith(
-      expect.objectContaining({
-        options: expect.arrayContaining([expect.objectContaining({ value: "abort", label: "Abort push" })]),
-      }),
-    );
+    expect(options).toContainEqual(expect.objectContaining({ value: "abort", label: "Abort push" }));
+  });
+
+  it("shows Apply suggested patch only when a patch is available", () => {
+    expect(buildFindingActionOptions({ hasPatch: false }).map((option) => option.value)).not.toContain("apply-patch");
+    expect(buildFindingActionOptions({ hasPatch: true }).map((option) => option.value)).toContain("apply-patch");
   });
 });

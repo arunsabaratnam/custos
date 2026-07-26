@@ -17,6 +17,7 @@ vi.mock("../../src/ui/prompts.js", () => ({
   promptFindingAction: vi.fn(),
   promptConfirm: vi.fn(),
   promptOverrideReason: vi.fn(),
+  promptReturnToActions: vi.fn(async () => {}),
 }));
 
 vi.mock("../../src/ui/renderFinding.js", () => ({
@@ -60,7 +61,7 @@ vi.mock("../../src/commands/repoState.js", async () => {
 
 const { getDiff } = await import("../../src/git/getDiff.js");
 const { scanDiff } = await import("../../src/scanner/scanDiff.js");
-const { promptFindingAction, promptConfirm, promptOverrideReason } = await import("../../src/ui/prompts.js");
+const { promptFindingAction, promptConfirm, promptOverrideReason, promptReturnToActions } = await import("../../src/ui/prompts.js");
 const { writeAuditEvent } = await import("../../src/audit/writeAudit.js");
 const { pollForToken, requestDeviceCode } = await import("../../src/auth/deviceFlow.js");
 const { resolveRepoState } = await import("../../src/commands/repoState.js");
@@ -180,6 +181,7 @@ describe("runScan — no findings / warnings", () => {
 
     expect(process.exitCode).toBe(0);
     expect(promptFindingAction).not.toHaveBeenCalled();
+    expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "finding_detected", action: "allowed" }));
   });
 
   it("--json emits findings and blocks (exit 1) when a blocking finding exists", async () => {
@@ -218,14 +220,17 @@ describe("runScan — blocking finding action menu", () => {
     expect(promptFindingAction).toHaveBeenCalledWith({ hasPatch: true, mode: "pre-push" });
   });
 
-  it("blocks the push and shows evidence when the user views details", async () => {
+  it("returns to the action menu after viewing technical details", async () => {
     vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
     vi.mocked(scanDiff).mockReturnValue([makeFinding()]);
-    vi.mocked(promptFindingAction).mockResolvedValue("view-details");
+    vi.mocked(promptFindingAction).mockResolvedValueOnce("view-details").mockResolvedValueOnce("abort");
 
     await runScan({});
 
     expect(process.exitCode).toBe(1);
+    expect(promptReturnToActions).toHaveBeenCalled();
+    expect(promptFindingAction).toHaveBeenCalledTimes(2);
+    expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "finding_blocked" }));
   });
 });
 
