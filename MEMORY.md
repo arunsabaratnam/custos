@@ -82,3 +82,12 @@ Each entry should include:
 - Imports/dependencies: Reused the existing local `accent` helper based on `chalk.hex("#E0B0FF")`; no imports or package dependencies changed.
 - Verification: Ran `npm run typecheck`, `npm test`, `npm run build`, rendered linked `custos` in a TTY, and launched `custos select` in a TTY to confirm purple border/title/commands/positive statuses with white supporting text.
 - Follow-ups: Keep this screen to a two-color palette unless the user explicitly changes the theme direction.
+
+## 2026-07-26 — Scan UI wording and lavender banner
+
+- Summary: Made the blocking scan action menu context-aware and aligned the scan banner with the welcome screen's lavender brand accent.
+- Affected files: `src/commands/scan.ts`, `src/ui/prompts.ts`, `src/ui/banner.ts`, `test/commands/scan.test.ts`, `test/ui/prompts.test.ts`, `test/auth/deviceFlow.test.ts`, `MEMORY.md`.
+- Functionality: Plain `custos scan` now says `Custos blocked this scan`, labels the abort action `Exit scan`, and exits with `Scan exited.`; `custos scan --pre-push` keeps push-specific wording (`Custos blocked this push`, `Abort push`, `Push aborted.`). The `c u s t o s` scan banner now uses a lavender gradient centered on `#E0B0FF` with a pale shimmer highlight instead of the old red/amber styling. Added a regression test for the Auth0 override configuration error spacing.
+- Imports/dependencies: No new imports or dependencies.
+- Verification: Ran `npm run typecheck`, `npm run lint`, `npm run build`, and `npm test` (outside the sandbox for subprocess `tsx` IPC access). Ran required sandbox verification via a temporary worktree from sibling `custos-testing`: `custos init`, committed benign `codex-ui-verification.txt`, and pushed `HEAD:refs/heads/codex/verify-ui-scan`; pre-push hook ran `custos scan --pre-push`, reported "No security issues detected.", skipped audit because `MONGODB_URI` is unset, and push succeeded.
+- Follow-ups: The real pre-push action-menu navigability issue is intentionally not addressed in this change set; user asked to handle that later.

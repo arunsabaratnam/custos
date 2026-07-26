@@ -3,12 +3,11 @@ import chalk from "chalk";
 
 const WORDMARK = "c u s t o s";
 
-// Deep red -> amber: echoes the severity palette instead of a generic
-// rainbow, so the brand banner still feels like a security tool.
-const custosGradient = gradient(["#ff5f56", "#ffbd2e"]);
+// Welcome-screen lavender with slightly deeper violet edges.
+const custosGradient = gradient(["#9B6DFF", "#E0B0FF", "#B77CFF"]);
 
-const GOLD: [number, number, number] = [255, 189, 46];
-const WHITE: [number, number, number] = [255, 255, 255];
+const SHIMMER_BASE: [number, number, number] = [224, 176, 255];
+const SHIMMER_HIGHLIGHT: [number, number, number] = [255, 247, 255];
 
 function animationEnabled(): boolean {
   return (
@@ -28,9 +27,9 @@ function sweepFrame(head: number): string {
   return chars
     .map((ch, i) => {
       const t = Math.max(0, 1 - Math.abs(i - head) / 2);
-      const r = Math.round(GOLD[0] + (WHITE[0] - GOLD[0]) * t);
-      const g = Math.round(GOLD[1] + (WHITE[1] - GOLD[1]) * t);
-      const b = Math.round(GOLD[2] + (WHITE[2] - GOLD[2]) * t);
+      const r = Math.round(SHIMMER_BASE[0] + (SHIMMER_HIGHLIGHT[0] - SHIMMER_BASE[0]) * t);
+      const g = Math.round(SHIMMER_BASE[1] + (SHIMMER_HIGHLIGHT[1] - SHIMMER_BASE[1]) * t);
+      const b = Math.round(SHIMMER_BASE[2] + (SHIMMER_HIGHLIGHT[2] - SHIMMER_BASE[2]) * t);
       return chalk.rgb(r, g, b)(ch);
     })
     .join("");

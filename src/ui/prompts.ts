@@ -1,13 +1,23 @@
 import * as clack from "@clack/prompts";
 
 export type FindingAction = "apply-patch" | "view-details" | "override" | "abort";
+export type FindingActionMode = "manual" | "pre-push";
 
-export async function promptFindingAction(hasPatch = false): Promise<FindingAction> {
+export type FindingActionOptions = {
+  hasPatch?: boolean;
+  mode?: FindingActionMode;
+};
+
+export async function promptFindingAction({
+  hasPatch = false,
+  mode = "manual",
+}: FindingActionOptions = {}): Promise<FindingAction> {
+  const abortLabel = mode === "pre-push" ? "Abort push" : "Exit scan";
   const options: Array<{ value: FindingAction; label: string; hint?: string }> = [
     ...(hasPatch ? [{ value: "apply-patch" as const, label: "Apply suggested patch", hint: "edit the file and block this push" }] : []),
     { value: "view-details", label: "View technical details" },
     { value: "override", label: "Force override with Auth0", hint: "requires audit reason" },
-    { value: "abort", label: "Abort push" },
+    { value: "abort", label: abortLabel },
   ];
 
   const result = await clack.select<FindingAction>({

@@ -182,7 +182,19 @@ describe("runScan — blocking finding action menu", () => {
     await runScan({});
 
     expect(process.exitCode).toBe(1);
+    expect(promptFindingAction).toHaveBeenCalledWith({ hasPatch: false, mode: "manual" });
     expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "finding_blocked" }));
+  });
+
+  it("uses pre-push action labels when scanning from a hook", async () => {
+    vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
+    vi.mocked(scanDiff).mockReturnValue([makeFinding({ patch: "const value = process.env.VALUE;" })]);
+    vi.mocked(promptFindingAction).mockResolvedValue("abort");
+
+    await runScan({ prePush: true });
+
+    expect(process.exitCode).toBe(1);
+    expect(promptFindingAction).toHaveBeenCalledWith({ hasPatch: true, mode: "pre-push" });
   });
 
   it("blocks the push and shows evidence when the user views details", async () => {

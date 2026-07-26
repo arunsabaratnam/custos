@@ -130,9 +130,8 @@ export async function runScan(options: ScanOptions): Promise<void> {
       return;
     }
 
-    console.log(
-      chalk.red.bold(`\nCustos blocked this push. ${blocking.length} issue(s) require action.\n`),
-    );
+    const blockedTarget = prePush ? "this push" : "this scan";
+    console.log(chalk.red.bold(`\nCustos blocked ${blockedTarget}. ${blocking.length} issue(s) require action.\n`));
 
     const commitSha = await getCommitSha();
     const interactive = await ensureInteractiveInput(prePush);
@@ -154,7 +153,7 @@ export async function runScan(options: ScanOptions): Promise<void> {
       return;
     }
 
-    await resolveBlockingFindings(blocking, hunks, config, commitSha);
+    await resolveBlockingFindings(blocking, hunks, config, commitSha, prePush);
   } catch (err) {
     // Hook must never crash unhandled — log and exit 1 to block push safely.
     console.error(chalk.red("\n[custos] Unexpected error:"), (err as Error).message);
@@ -172,9 +171,13 @@ async function resolveBlockingFindings(
   hunks: DiffHunk[],
   config: EffectiveConfig,
   commitSha: string | undefined,
+  prePush: boolean,
 ): Promise<void> {
   for (const finding of blocking) {
-    const action = await promptFindingAction(Boolean(finding.patch));
+    const action = await promptFindingAction({
+      hasPatch: Boolean(finding.patch),
+      mode: prePush ? "pre-push" : "manual",
+    });
 
     if (action === "abort") {
       await tryWriteAudit(config.auditEnabled, {
@@ -183,7 +186,7 @@ async function resolveBlockingFindings(
         action: "blocked",
         createdAt: new Date(),
       });
-      clack.outro(chalk.red("Push aborted."));
+      clack.outro(chalk.red(prePush ? "Push aborted." : "Scan exited."));
       process.exitCode = 1;
       return;
     }
