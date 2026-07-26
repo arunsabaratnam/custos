@@ -1,8 +1,8 @@
 # Custos
 
-Custos brings extreme shift-left security into the terminal for solo developers and small teams.
+Custos is a terminal-native CLI tool that brings extreme shift-left security to solo developers and small teams.
 
-In the age of agentic coding, risky changes can slip in fast. Custos installs a local Git `pre-push` hook, scans outgoing diffs before code leaves your laptop, and turns security decisions into clear terminal actions: patch it, inspect it, override with accountability, or block the push.
+In the age of agentic coding, risky changes can slip in fast. Custos runs in your command line, installs a local Git `pre-push` hook, scans outgoing diffs before code leaves your laptop, and turns security decisions into clear terminal actions: patch it, inspect it, override with accountability, or block the push.
 
 <br />
 <div align="center">
