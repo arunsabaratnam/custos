@@ -3,14 +3,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import tty from "node:tty";
 import chalk from "chalk";
-import * as clack from "@clack/prompts";
 import { execa } from "execa";
 import { getDiff } from "../git/getDiff.js";
 import { parseDiff } from "../git/parseDiff.js";
 import { scanDiff } from "../scanner/scanDiff.js";
 import type { DiffHunk, Finding, Severity } from "../scanner/types.js";
 import { renderFinding } from "../ui/renderFinding.js";
-import { promptConfirm, promptFindingAction, promptOverrideReason } from "../ui/prompts.js";
 import { renderBanner } from "../ui/banner.js";
 import { withSpinner, startElapsedSpinner } from "../ui/spinner.js";
 import {
@@ -56,11 +54,12 @@ export async function runScan(options: ScanOptions): Promise<void> {
   try {
     const config = await resolveEffectiveConfig();
 
-    // Git pipes ref-pair lines on stdin in pre-push mode. Drain it fully
-    // before doing anything else — this is the only chance to read it.
+    // Git pipes ref-pair lines on stdin in pre-push mode. Newer Custos hooks
+    // write those lines to CUSTOS_PRE_PUSH_STDIN_FILE and give this process
+    // /dev/tty as stdin so interactive prompts can read arrow keys.
     let stdin: string | undefined;
-    if (prePush && !process.stdin.isTTY) {
-      stdin = await readAllStdin();
+    if (prePush) {
+      stdin = await readPrePushStdin();
     }
 
     const rawDiff = await withSpinner("scan", "Reading outgoing diff...", () => getDiff(stdin));
@@ -174,6 +173,7 @@ async function resolveBlockingFindings(
   prePush: boolean,
 ): Promise<void> {
   for (const finding of blocking) {
+    const { promptFindingAction } = await import("../ui/prompts.js");
     const action = await promptFindingAction({
       hasPatch: Boolean(finding.patch),
       mode: prePush ? "pre-push" : "manual",
@@ -186,7 +186,7 @@ async function resolveBlockingFindings(
         action: "blocked",
         createdAt: new Date(),
       });
-      clack.outro(chalk.red(prePush ? "Push aborted." : "Scan exited."));
+      await promptOutro(chalk.red(prePush ? "Push aborted." : "Scan exited."));
       process.exitCode = 1;
       return;
     }
@@ -262,6 +262,7 @@ async function handleApplyPatch(
   console.log(chalk.green(patch));
   console.log("");
 
+  const { promptConfirm } = await import("../ui/prompts.js");
   const confirmed = await promptConfirm("Apply this patch to the file?", false);
   if (!confirmed) {
     await tryWriteAudit(config.auditEnabled, {
@@ -297,7 +298,7 @@ async function handleApplyPatch(
     createdAt: new Date(),
   });
 
-  clack.outro(chalk.green("Patch applied. Review the change, stage it, commit, and push again."));
+  await promptOutro(chalk.green("Patch applied. Review the change, stage it, commit, and push again."));
   // Custos never lets a patched file ride through on the same push.
   process.exitCode = 1;
 }
@@ -307,9 +308,10 @@ async function handleOverride(
   config: EffectiveConfig,
   commitSha: string | undefined,
 ): Promise<void> {
+  const { promptConfirm, promptOverrideReason } = await import("../ui/prompts.js");
   const reason = await promptOverrideReason();
   if (!reason) {
-    clack.outro(chalk.red("Override cancelled."));
+    await promptOutro(chalk.red("Override cancelled."));
     process.exitCode = 1;
     return;
   }
@@ -324,7 +326,7 @@ async function handleOverride(
       action: "blocked",
       createdAt: new Date(),
     });
-    clack.outro(chalk.red("Authentication failed. Override cancelled."));
+    await promptOutro(chalk.red("Authentication failed. Override cancelled."));
     process.exitCode = 1;
     return;
   }
@@ -345,13 +347,13 @@ async function handleOverride(
       false,
     );
     if (!proceedUnlogged) {
-      clack.outro(chalk.red("Override cancelled — push blocked (audit log required)."));
+      await promptOutro(chalk.red("Override cancelled — push blocked (audit log required)."));
       process.exitCode = 1;
       return;
     }
   }
 
-  clack.outro(
+  await promptOutro(
     chalk.green(`Override approved. Authenticated as ${override.userEmail ?? "unknown"}. Push allowed.`),
   );
   process.exitCode = 0;
@@ -420,6 +422,24 @@ function readAllStdin(): Promise<string> {
   });
 }
 
+async function readPrePushStdin(): Promise<string | undefined> {
+  const stdinFile = process.env.CUSTOS_PRE_PUSH_STDIN_FILE;
+  if (stdinFile) {
+    try {
+      return await fs.readFile(stdinFile, "utf8");
+    } catch (err) {
+      console.error(chalk.dim(`[custos] Could not read Git pre-push refs: ${(err as Error).message}`));
+      return undefined;
+    }
+  }
+
+  if (!process.stdin.isTTY) {
+    return readAllStdin();
+  }
+
+  return undefined;
+}
+
 /**
  * Returns whether interactive prompts can be used for the rest of this run.
  *
@@ -460,6 +480,11 @@ async function ensureInteractiveInput(prePush: boolean): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function promptOutro(message: string): Promise<void> {
+  const clack = await import("@clack/prompts");
+  clack.outro(message);
 }
 
 // ---------------------------------------------------------------------------

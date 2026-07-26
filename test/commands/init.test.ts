@@ -36,6 +36,9 @@ describe("runInit", () => {
     const hookPath = path.join(tmpDir, ".git", "hooks", "pre-push");
     const content = await fs.readFile(hookPath, "utf8");
     expect(content).toContain("custos scan --pre-push");
+    expect(content).toContain("CUSTOS_PRE_PUSH_STDIN_FILE");
+    expect(content).toContain("( : < /dev/tty ) 2>/dev/null");
+    expect(content).toContain("< /dev/tty");
   });
 
   it("makes the hook executable", async () => {
@@ -72,7 +75,7 @@ describe("runInit", () => {
 
     const hookPath = path.join(tmpDir, ".git", "hooks", "pre-push");
     const content = await fs.readFile(hookPath, "utf8");
-    const count = (content.match(/custos scan --pre-push/g) ?? []).length;
+    const count = (content.match(/# >>> custos pre-push >>>/g) ?? []).length;
     expect(count).toBe(1);
   });
 

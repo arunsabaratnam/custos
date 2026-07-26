@@ -93,12 +93,15 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
 
 let tmpDir: string;
 let originalStdin: NodeJS.ReadStream;
+let originalPrePushStdinFile: string | undefined;
 let logSpy: ReturnType<typeof vi.spyOn>;
 let errorSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "custos-scan-test-"));
   originalStdin = process.stdin;
+  originalPrePushStdinFile = process.env.CUSTOS_PRE_PUSH_STDIN_FILE;
+  delete process.env.CUSTOS_PRE_PUSH_STDIN_FILE;
   Object.defineProperty(process, "stdin", {
     configurable: true,
     value: { isTTY: true },
@@ -126,6 +129,11 @@ beforeEach(async () => {
 
 afterEach(async () => {
   Object.defineProperty(process, "stdin", { configurable: true, value: originalStdin });
+  if (originalPrePushStdinFile === undefined) {
+    delete process.env.CUSTOS_PRE_PUSH_STDIN_FILE;
+  } else {
+    process.env.CUSTOS_PRE_PUSH_STDIN_FILE = originalPrePushStdinFile;
+  }
   process.exitCode = undefined;
   vi.resetAllMocks();
   logSpy.mockRestore();
@@ -140,6 +148,19 @@ describe("runScan — no findings / warnings", () => {
     await runScan({});
 
     expect(process.exitCode).toBe(0);
+  });
+
+  it("reads pre-push ref lines from the hook temp file when present", async () => {
+    const refs = "refs/heads/main local-sha refs/heads/main remote-sha\n";
+    const stdinFile = path.join(tmpDir, "pre-push-stdin.txt");
+    await fs.writeFile(stdinFile, refs, "utf8");
+    process.env.CUSTOS_PRE_PUSH_STDIN_FILE = stdinFile;
+    vi.mocked(getDiff).mockResolvedValue("");
+
+    await runScan({ prePush: true });
+
+    expect(process.exitCode).toBe(0);
+    expect(getDiff).toHaveBeenCalledWith(refs);
   });
 
   it("exits 0 when no findings are detected", async () => {

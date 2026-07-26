@@ -91,3 +91,12 @@ Each entry should include:
 - Imports/dependencies: No new imports or dependencies.
 - Verification: Ran `npm run typecheck`, `npm run lint`, `npm run build`, and `npm test` (outside the sandbox for subprocess `tsx` IPC access). Ran required sandbox verification via a temporary worktree from sibling `custos-testing`: `custos init`, committed benign `codex-ui-verification.txt`, and pushed `HEAD:refs/heads/codex/verify-ui-scan`; pre-push hook ran `custos scan --pre-push`, reported "No security issues detected.", skipped audit because `MONGODB_URI` is unset, and push succeeded.
 - Follow-ups: The real pre-push action-menu navigability issue is intentionally not addressed in this change set; user asked to handle that later.
+
+## 2026-07-26 — Make pre-push prompts navigable from Git hooks
+
+- Summary: Fixed the pre-push action menu so `@clack/prompts` receives real TTY input instead of Git's exhausted ref-update stdin.
+- Affected files: `src/commands/repoState.ts`, `src/commands/scan.ts`, `test/commands/init.test.ts`, `test/commands/scan.test.ts`, `MEMORY.md`.
+- Functionality: `custos init` now installs a pre-push block that saves Git's stdin ref lines to a temp file, runs `custos scan --pre-push` with `CUSTOS_PRE_PUSH_STDIN_FILE` set, and redirects stdin from `/dev/tty` only when the shell can actually open it. If `/dev/tty` is unavailable (for example non-interactive command runners), the hook falls back to non-TTY scan mode instead of failing with `Device not configured`. `runScan` reads that temp file first and falls back to legacy piped stdin for older hooks. Prompt helpers are now dynamically imported only after interactive stdin is ready, so old hooks using the `/dev/tty` rebind path are also covered.
+- Imports/dependencies: No new packages. Continued use of existing `node:fs/promises`, `node:tty`, and dynamic `import("../ui/prompts.js")` / `import("@clack/prompts")`.
+- Verification: Ran `npm run typecheck`, `npm run lint`, `npm run build`, full `npm test` (68 tests), and a real PTY `git push` in a temporary `custos-testing` worktree with a vulnerable commit. Sent Down+Enter to the prompt; selection moved to `View technical details`, evidence printed, and the push was blocked with `failed to push some refs`.
+- Follow-ups: Existing repos need `custos init` once to rewrite the installed pre-push hook to the new temp-file/TTY wrapper.
