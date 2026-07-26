@@ -4,6 +4,13 @@ Custos brings extreme shift-left security into the terminal for solo developers 
 
 In the age of agentic coding, risky changes can slip in fast. Custos installs a local Git `pre-push` hook, scans outgoing diffs before code leaves your laptop, and turns security decisions into clear terminal actions: patch it, inspect it, override with accountability, or block the push.
 
+<br />
+<div align="center">
+
+[![Devpost | custos](https://badges.devpost-shields.com/get-badge?name=custos&id=custos-9xl5k4&type=big-logo&style=for-the-badge)](https://devpost.com/software/custos-9xl5k4)
+
+</div>
+
 ## What It Does
 
 - Scans outgoing Git diffs locally before push.
