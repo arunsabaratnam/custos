@@ -2,17 +2,42 @@
   "name": "custos",
   "version": "0.1.0",
   "description": "Terminal-native, local-first developer security sidekick",
+  "license": "MIT",
+  "keywords": [
+    "security",
+    "developer-tools",
+    "cli",
+    "git-hook",
+    "pre-push",
+    "application-security"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arunsabaratnam/custos.git"
+  },
+  "bugs": {
+    "url": "https://github.com/arunsabaratnam/custos/issues"
+  },
+  "homepage": "https://github.com/arunsabaratnam/custos#readme",
   "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "bin": {
     "custos": "./dist/cli.js"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "clean": "node scripts/clean-dist.mjs",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "postbuild": "node scripts/mark-bin-executable.mjs",
     "start": "node dist/cli.js",
     "lint": "eslint src test",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@clack/prompts": "^0.9.1",

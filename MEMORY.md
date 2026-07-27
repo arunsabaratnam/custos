@@ -11,6 +11,15 @@ Each entry should include:
 - Verification: tests, builds, or manual checks run.
 - Follow-ups: anything a future agent should remember.
 
+## 2026-07-26 — Prepare public npm package installation
+
+- Summary: Prepared the unscoped `custos` package for public npm distribution while retaining the local development workflow. Updated package metadata and README installation/publishing instructions based on npm and modern npm package guidance.
+- Affected files: `package.json`, `package-lock.json`, `scripts/clean-dist.mjs`, `scripts/mark-bin-executable.mjs`, and `README.md`.
+- Functionality: `npm run build` now clears stale compiled files and restores executable permissions on `dist/cli.js`; the package explicitly ships only `dist`, `README.md`, and `LICENSE`. README now documents `npm install --global custos`, per-repository `custos init`, local `npm link`, local global installation, and maintainer publishing steps.
+- Imports/dependencies: Added only Node built-ins in the build helper scripts; no runtime dependency changes.
+- Verification: `npm install --package-lock-only --ignore-scripts`, `npm run build`, `npm run typecheck`, `npm run lint`, and full `npm test` passed with 111 tests. `npm pack --dry-run --json` confirmed a 61-file tarball containing current `dist/cli.js` with mode 755 and no deleted `claimsBuilder` artifact.
+- Follow-ups: The package is prepared but not published. Confirm npm account ownership/name availability, run `npm login`, review `npm pack --dry-run`, increment the version with `npm version`, and publish. Public unscoped packages are used for the documented `npm install --global custos` command; private npm packages require a scoped name and paid npm account.
+
 ## 2026-07-26 — Security QA, Auth0 verification, and documentation cleanup
 
 - Summary: Performed a focused OWASP-style quality pass and remediated concrete fail-open and integrity gaps. Removed stale scaffolding and dependencies, and revised public documentation to match the shipped implementation rather than the original plan.

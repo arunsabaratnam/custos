@@ -78,20 +78,63 @@ custos select       # interactive command launcher
 
 ## Installation
 
-For local development:
+### Install From npm
+
+Once the public package is published, install the `custos` command globally:
 
 ```bash
-npm install
-npm run build
-npm link
-cp .env.example .env
+npm install --global custos
 ```
 
-Then initialize Custos inside a Git repository:
+Then move into any Git repository you want to protect and initialize Custos:
 
 ```bash
+cd /path/to/your-repository
 custos init
 ```
+
+This writes a `.custos/config.json` file and installs a `.git/hooks/pre-push` hook for that repository. Custos is installed globally, but protection is enabled separately per repository. The target repository needs Git and Node.js 18 or newer.
+
+Place the integration credentials in the target repository's `.env` file or export them in the shell before scanning. Never commit `.env`.
+
+### Local Development
+
+To run the unreleased source build while developing Custos:
+
+```bash
+cd /path/to/custos
+npm install
+cp .env.example .env
+npm run build
+npm link
+```
+
+Then initialize a separate test repository:
+
+```bash
+cd /path/to/test-repository
+custos init
+```
+
+`npm link` is convenient for active development because the global `custos` command points at the local package. `npm install --global .` is an alternative local installation that behaves more like a published package:
+
+```bash
+npm run build
+npm install --global .
+```
+
+### Publishing Maintainers
+
+The package is configured as a public, unscoped npm package. Publishing requires an npm account and should use 2FA:
+
+```bash
+npm login
+npm version patch
+npm pack --dry-run
+npm publish
+```
+
+`prepublishOnly` builds `dist/` automatically before publishing. Review the `npm pack --dry-run` contents before release and confirm that no credentials, local configuration, tests, or development files are included.
 
 ## Configuration
 
