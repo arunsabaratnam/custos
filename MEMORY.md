@@ -225,3 +225,12 @@ Each entry should include:
 - Imports/dependencies: None.
 - Verification: `npm run typecheck`, `npm run lint`, `npm test -- --run test/commands/audit.test.ts` (7 tests), and `npm run build` passed.
 - Follow-ups: Include this change with the pending AI/Mongo optimization work when creating the next commit.
+
+## 2026-07-27 — Publish scoped npm package
+
+- Summary: Published Custos as the public scoped npm package `@kylekhai/custos` and updated repository metadata and user-facing installation documentation.
+- Affected files: `package.json`, `package-lock.json`, `README.md`, `MEMORY.md`.
+- Functionality: Global installation now uses `npm install --global @kylekhai/custos`; the CLI command remains `custos`. README links to the npm package page, removes maintainer-only publishing instructions, and keeps dependency typo-squatting analysis as a future item. The package name and lockfile root metadata now use the scoped name.
+- Imports/dependencies: No runtime dependency changes.
+- Verification: `npm publish --access public` completed successfully for `@kylekhai/custos@0.1.0`; package contents included the built CLI and intended distribution files.
+- Follow-ups: Add dependency typo-squatting detection and broader dependency analysis.

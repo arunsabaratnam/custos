@@ -1,4 +1,4 @@
-# Custos ₍⸍⸌̣ʷ̣̫⸍̣⸌₎ﾉ🔒
+# Custos ( • ֊ •)ﾉ🔒
 
 Custos is a terminal-native CLI tool that brings extreme shift-left security to solo developers and small teams.
 
@@ -80,10 +80,12 @@ custos select       # interactive command launcher
 
 ### Install From npm
 
-Once the public package is published, install the `custos` command globally:
+Install the published package globally:
+
+[View `@kylekhai/custos` on npm](https://www.npmjs.com/package/@kylekhai/custos)
 
 ```bash
-npm install --global custos
+npm install --global @kylekhai/custos
 ```
 
 Then move into any Git repository you want to protect and initialize Custos:
@@ -122,19 +124,6 @@ custos init
 npm run build
 npm install --global .
 ```
-
-### Publishing Maintainers
-
-The package is configured as a public, unscoped npm package. Publishing requires an npm account and should use 2FA:
-
-```bash
-npm login
-npm version patch
-npm pack --dry-run
-npm publish
-```
-
-`prepublishOnly` builds `dist/` automatically before publishing. Review the `npm pack --dry-run` contents before release and confirm that no credentials, local configuration, tests, or development files are included.
 
 ## Configuration
 
@@ -212,8 +201,7 @@ npm run dev -- doctor
 ## Next Steps
 
 - Add audit filters for repo, branch, user, severity, action, and time range.
-- Add package typo-squatting detection and broader dependency analysis.
-- Package Custos for installation without local linking.
+- Expand dependency security analysis, including package typo-squatting detection.
 - Add MCP support for terminal agents to inspect findings and audit history.
 
 ## Acknowledgements
