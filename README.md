@@ -24,6 +24,10 @@ In the age of agentic coding, risky changes can slip in fast. Custos runs in you
 
 ## Screenshots
 
+## Demo Video
+
+[![Watch the Custos demo](https://img.youtube.com/vi/UrBXGnYpIbc/maxresdefault.jpg)](https://youtu.be/UrBXGnYpIbc)
+
 ### Welcome
 
 The main `custos` screen shows project status, hook installation, and the core commands.
