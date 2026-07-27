@@ -34,6 +34,10 @@ export function mergeFindings(
       confidence: aiFinding.confidence,
       exploitability: aiFinding.exploitability,
       trustBoundary: aiFinding.trustBoundary,
+      aiAnalysis: {
+        assessedRisk: candidate.severity,
+        isExploitable: candidate.exploitability !== "unknown",
+      },
     };
   }
 
@@ -60,10 +64,20 @@ function toFinding(candidate: AiScanFinding, minConfidence: number): Finding {
 
 function isGrounded(candidate: AiScanFinding, context: AiScanContext): boolean {
   const file = context.files.find((entry) => entry.path === candidate.file);
-  if (!file) return false;
-  if (candidate.line !== undefined && !file.addedLines.some((line) => line.line === candidate.line)) return false;
+  const known = context.knownFindings.find(
+    (finding) =>
+      finding.file === candidate.file &&
+      (candidate.line === undefined || finding.line === undefined || finding.line === candidate.line),
+  );
+  if (!file && !known) return false;
+  if (file && candidate.line !== undefined && !file.addedLines.some((line) => line.line === candidate.line) && !known) {
+    return false;
+  }
 
-  const haystack = `${file.addedLines.map((line) => line.content).join("\n")}\n${file.nearbyContext}`.toLowerCase();
+  const haystack = [
+    file ? `${file.addedLines.map((line) => line.content).join("\n")}\n${file.nearbyContext}` : "",
+    known?.evidence ?? "",
+  ].join("\n").toLowerCase();
   const evidence = redactSecrets(candidate.evidence).trim().toLowerCase();
   return evidence.length >= 3 && (haystack.includes(evidence) || evidence.includes("[redacted"));
 }

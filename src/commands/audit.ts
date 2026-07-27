@@ -11,6 +11,10 @@ export type AuditOptions = {
 };
 
 const DEFAULT_LIMIT = 50;
+const TABLE_PADDING = 4; // two borders plus one interior space on each side
+
+type TableColumnKey = "commit" | "time" | "event" | "action" | "severity" | "finding" | "file" | "user";
+type TableColumn = { key: TableColumnKey; label: string; width: number };
 
 /**
  * `custos audit` — shows recent audit events from MongoDB.
@@ -27,7 +31,7 @@ export async function runAudit(options: AuditOptions = {}): Promise<void> {
     const lines = options.table ? formatAuditTable(events) : formatAuditEvents(events);
 
     if (options.table) {
-      printLines(lines, { preserveWideLines: true });
+      printLines(lines);
     } else if (options.pager !== false && shouldPage(lines)) {
       await pageLines(lines);
     } else {
@@ -42,23 +46,14 @@ export async function runAudit(options: AuditOptions = {}): Promise<void> {
   }
 }
 
-export function formatAuditTable(events: AuditEvent[]): string[] {
+export function formatAuditTable(events: AuditEvent[], terminalWidth = tableTerminalWidth()): string[] {
   if (events.length === 0) {
     return [
       chalk.dim("No audit events found."),
     ];
   }
 
-  const columns = [
-    { label: "Commit", width: 12 },
-    { label: "Time", width: 16 },
-    { label: "Event", width: 18 },
-    { label: "Action", width: 10 },
-    { label: "Severity", width: 10 },
-    { label: "Finding", width: 30 },
-    { label: "File", width: 22 },
-    { label: "User", width: 24 },
-  ] as const;
+  const columns = responsiveTableColumns(terminalWidth);
 
   const header = columns.map((column) => pad(column.label, column.width)).join("  ");
   const divider = columns.map((column) => "─".repeat(column.width)).join("  ");
@@ -67,16 +62,7 @@ export function formatAuditTable(events: AuditEvent[]): string[] {
   for (const event of events) {
     const finding = event.finding;
     const severity = finding?.severity ?? "-";
-    const values = [
-      { value: event.commitSha?.slice(0, 12) ?? "unknown", width: columns[0].width },
-      { value: formatDateShort(event.createdAt), width: columns[1].width },
-      { value: event.eventType, width: columns[2].width },
-      { value: event.action, width: columns[3].width },
-      { value: severity, width: columns[4].width, color: finding ? severityColor[finding.severity] : chalk.white },
-      { value: finding?.title ?? "-", width: columns[5].width },
-      { value: formatLocation(finding), width: columns[6].width },
-      { value: event.userEmail ?? event.userId ?? "unknown", width: columns[7].width },
-    ];
+    const values = columns.map((column) => tableCell(column, event, finding, severity));
 
     bodyLines.push(
       values
@@ -89,6 +75,74 @@ export function formatAuditTable(events: AuditEvent[]): string[] {
   }
 
   return blockLines(bodyLines);
+}
+
+function responsiveTableColumns(terminalWidth: number): TableColumn[] {
+  const available = Math.max(40, terminalWidth - TABLE_PADDING);
+  const full: TableColumn[] = [
+    { key: "commit", label: "Commit", width: 12 },
+    { key: "time", label: "Time", width: 16 },
+    { key: "event", label: "Event", width: 18 },
+    { key: "action", label: "Action", width: 10 },
+    { key: "severity", label: "Severity", width: 10 },
+    { key: "finding", label: "Finding", width: 30 },
+    { key: "file", label: "File", width: 22 },
+    { key: "user", label: "User", width: 24 },
+  ];
+
+  if (tableWidth(full) <= available) return full;
+
+  const medium: TableColumn[] = full.filter((column) => column.key !== "user");
+  const mediumFinding = available - tableWidthWithoutFinding(medium);
+  if (mediumFinding >= 30) {
+    return medium.map((column) => column.key === "finding" ? { ...column, width: mediumFinding } : column);
+  }
+
+  const compact: TableColumn[] = [
+    { key: "commit", label: "Commit", width: 8 },
+    { key: "time", label: "Time", width: 16 },
+    { key: "event", label: "Event", width: 14 },
+    { key: "action", label: "Action", width: 9 },
+    { key: "severity", label: "Severity", width: 9 },
+    { key: "finding", label: "Finding", width: 7 },
+  ];
+  const compactFinding = Math.max(7, available - tableWidthWithoutFinding(compact));
+  return compact.map((column) => column.key === "finding" ? { ...column, width: compactFinding } : column);
+}
+
+function tableCell(column: TableColumn, event: AuditEvent, finding: Finding | undefined, severity: string): {
+  value: string;
+  width: number;
+  color?: (text: string) => string;
+} {
+  const values: Record<TableColumnKey, string> = {
+    commit: event.commitSha?.slice(0, 12) ?? "unknown",
+    time: formatDateShort(event.createdAt),
+    event: event.eventType,
+    action: event.action,
+    severity,
+    finding: finding?.title ?? "-",
+    file: formatLocation(finding),
+    user: event.userEmail ?? event.userId ?? "unknown",
+  };
+
+  return {
+    value: values[column.key],
+    width: column.width,
+    ...(column.key === "severity" ? { color: finding ? severityColor[finding.severity] : chalk.white } : {}),
+  };
+}
+
+function tableWidth(columns: TableColumn[]): number {
+  return columns.reduce((total, column) => total + column.width, 0) + Math.max(0, columns.length - 1) * 2;
+}
+
+function tableWidthWithoutFinding(columns: TableColumn[]): number {
+  return tableWidth(columns) - (columns.find((column) => column.key === "finding")?.width ?? 0);
+}
+
+function tableTerminalWidth(): number {
+  return process.stdout.isTTY ? (process.stdout.columns ?? 160) : 160;
 }
 
 export function formatAuditEvents(events: AuditEvent[]): string[] {

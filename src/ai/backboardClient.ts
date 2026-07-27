@@ -12,6 +12,7 @@ import {
 import {
   buildExplainPrompt,
   buildPatchPrompt,
+  buildSecurityEnrichmentPrompt,
   buildSecurityScanPrompt,
   getExplainModel,
   getPatchModel,
@@ -175,7 +176,7 @@ function parseWith<T>(schema: z.ZodTypeAny, raw: unknown): T {
         .join("; "),
     );
   }
-  const detail = issues.find(Boolean);
+  const detail = [...issues].reverse().find(Boolean);
   throw new Error(`Backboard response did not match the expected schema${detail ? ` (${detail})` : ""}`);
 }
 
@@ -238,6 +239,29 @@ export async function reviewSecurityContext(context: AiScanContext): Promise<AiS
       memory: "off",
       web_search: "off",
       metadata: { source: "custos-security-scan", context_version: context.version },
+    },
+    context.limits.timeoutMs,
+  );
+  return parseWith<AiScanResponse>(aiScanResponseSchema, raw);
+}
+
+/** Enriches deterministic findings in one compact request, independent of discovery. */
+export async function enrichSecurityFindings(context: AiScanContext): Promise<AiScanResponse> {
+  if (context.knownFindings.length === 0) return { findings: [] };
+
+  const model = getSecurityScanModel();
+  const scanAssistantId = process.env.BACKBOARD_SCAN_ASSISTANT_ID;
+  const raw = await callBackboard(
+    {
+      content: "Enrich the confirmed deterministic security findings for developer-facing remediation.",
+      system_prompt: buildSecurityEnrichmentPrompt(context),
+      llm_provider: model.llm_provider,
+      model_name: model.model_name,
+      json_output: true,
+      ...(scanAssistantId ? { assistant_id: scanAssistantId } : {}),
+      memory: "off",
+      web_search: "off",
+      metadata: { source: "custos-security-enrichment", context_version: context.version },
     },
     context.limits.timeoutMs,
   );

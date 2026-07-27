@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { explainFinding, reviewSecurityContext } from "../../src/ai/backboardClient.js";
+import { enrichSecurityFindings, explainFinding, reviewSecurityContext } from "../../src/ai/backboardClient.js";
 import type { AiScanContext } from "../../src/context/buildScanContext.js";
 import type { DiffHunk, Finding } from "../../src/scanner/types.js";
 
@@ -33,6 +33,7 @@ const scanContext: AiScanContext = {
       nearbyContext: "",
     },
   ],
+  knownFindings: [],
   limits: { maxFindings: 5, timeoutMs: 10_000 },
   omittedFileCount: 0,
 };
@@ -122,6 +123,7 @@ describe("explainFinding (Backboard client)", () => {
     );
     const request = vi.mocked(fetch).mock.calls[0]?.[1];
     expect(JSON.parse(String(request?.body))).not.toHaveProperty("assistant_id");
+    expect(String(JSON.parse(String(request?.body)).system_prompt)).toContain("MUST return one matching entry");
   });
 
   it("uses only an explicitly configured clean scan assistant", async () => {
@@ -136,6 +138,41 @@ describe("explainFinding (Backboard client)", () => {
       memory: "off",
       web_search: "off",
     });
+  });
+
+  it("enriches confirmed findings in a separate compact request", async () => {
+    mockFetchJson({
+      findings: [{
+        severity: "critical",
+        category: "secret",
+        title: "Hardcoded API key detected",
+        file: "src/server.ts",
+        line: 12,
+        evidence: 'const KEY = "[REDACTED]";',
+        explanation: "The credential would be exposed in source control.",
+        recommendation: "Move it to a secret store and rotate it.",
+        confidence: 0.98,
+        exploitability: "high",
+        trustBoundary: "source control",
+      }],
+    });
+
+    const result = await enrichSecurityFindings({
+      ...scanContext,
+      knownFindings: [{
+        id: "hardcoded-api-key",
+        severity: "critical",
+        category: "secret",
+        title: "Hardcoded API key detected",
+        file: "src/server.ts",
+        line: 12,
+        evidence: 'const KEY = "[REDACTED]";',
+      }],
+    });
+
+    expect(result.findings).toHaveLength(1);
+    const request = vi.mocked(fetch).mock.calls[0]?.[1];
+    expect(String(JSON.parse(String(request?.body)).system_prompt)).toContain("confirmed policy violation");
   });
 
   it("accepts fenced JSON and optional fields omitted by a model", async () => {
@@ -182,6 +219,26 @@ describe("explainFinding (Backboard client)", () => {
     const result = await reviewSecurityContext(scanContext);
 
     expect(result.findings[0]).toMatchObject({ severity: "high", category: "secret", confidence: 0.75 });
+  });
+
+  it("normalizes percentage confidence values", async () => {
+    mockFetchJson({
+      findings: [{
+        severity: "high",
+        category: "secret",
+        title: "Credential exposed in source",
+        file: "src/server.ts",
+        line: 12,
+        evidence: 'const KEY = "[REDACTED]";',
+        explanation: "The credential can be recovered from source control.",
+        recommendation: "Move it to a secret store and rotate it.",
+        confidence: 95,
+      }],
+    });
+
+    const result = await reviewSecurityContext(scanContext);
+
+    expect(result.findings[0]?.confidence).toBe(0.95);
   });
 
   it("retries one rate-limited response before failing", async () => {

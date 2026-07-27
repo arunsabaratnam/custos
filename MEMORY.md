@@ -189,3 +189,21 @@ Each entry should include:
 - Imports/dependencies: Added existing `zod` runtime type import and reused the local secret redactor; no dependency changes.
 - Verification: `npm run typecheck`, `npm run lint`, `npm run build`, focused tests (3 files, 37 tests), and the full suite outside the sandbox all passed (17 files, 103 tests). Ran the built CLI against the configured Backboard environment in JSON mode: Backboard completed, returned two findings, and both carried AI/hybrid metadata. No credentials or source contents were printed.
 - Follow-ups: Continue to keep external responses bounded and redacted in diagnostics.
+
+## 2026-07-26 — Reduce scan integration latency
+
+- Summary: Replaced sequential per-finding Backboard explanations with parallel batched enrichment and discovery, and moved MongoDB setup work off the interactive scan path.
+- Affected files: `src/context/buildScanContext.ts`, `src/ai/prompts.ts`, `src/ai/backboardClient.ts`, `src/ai/schemas.ts`, `src/scanner/mergeFindings.ts`, `src/commands/scan.ts`, `src/audit/mongo.ts`, `src/audit/writeAudit.ts`, `test/ai/backboardClient.test.ts`, `test/context/buildScanContext.test.ts`, `test/scanner/mergeFindings.test.ts`, `test/commands/scan.test.ts`, `MEMORY.md`.
+- Functionality: One compact Backboard enrichment request for all deterministic findings now runs concurrently with independent discovery, rather than waiting for one explanation request per finding. Either successful result is retained if the companion request fails. Redacted known findings ground `.env.example` enrichment even though raw environment-file content is excluded from discovery context. Backboard percentage confidence values (for example `95`) normalize to fractional confidence (`0.95`). MongoDB warms while the diff is read, uses a shorter connection timeout with runtime index creation disabled, caches repository metadata, overlaps metadata with connection setup, and writes finding audit events concurrently.
+- Imports/dependencies: No dependency changes.
+- Verification: `npm run typecheck`, `npm run lint`, `npm run build`, focused integration tests (44 tests), and the full suite outside the sandbox all passed (17 files, 108 tests). A live built-CLI scan with the configured Backboard and MongoDB integrations completed in about eight seconds and returned five AI/hybrid findings; no credentials or source content were printed.
+- Follow-ups: Tune the deterministic `.env.example` rule separately so placeholder-only templates are not reported as credential leaks. Do not weaken the redaction boundary to chase AI accuracy.
+
+## 2026-07-27 — Make audit table responsive
+
+- Summary: Prevented `custos audit --table` from clipping the `Finding` column on narrow terminals.
+- Affected files: `src/commands/audit.ts`, `test/commands/audit.test.ts`, `MEMORY.md`.
+- Functionality: Audit-table columns now adapt to the current terminal width. `Commit` remains leftmost; full layouts retain all columns, medium layouts hide `User`, and compact layouts also hide `File` while allocating reclaimed space to `Finding`. Rows are intentionally ellipsized within the bordered table instead of overflowing or relying on disabled terminal wrapping.
+- Imports/dependencies: None.
+- Verification: `npm run typecheck`, `npm run lint`, `npm test -- --run test/commands/audit.test.ts` (7 tests), and `npm run build` passed.
+- Follow-ups: Include this change with the pending AI/Mongo optimization work when creating the next commit.

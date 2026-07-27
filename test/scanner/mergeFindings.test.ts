@@ -14,6 +14,7 @@ const context: AiScanContext = {
       nearbyContext: "",
     },
   ],
+  knownFindings: [],
   limits: { maxFindings: 5, timeoutMs: 10_000 },
   omittedFileCount: 0,
 };
@@ -67,5 +68,32 @@ describe("mergeFindings", () => {
   it("rejects AI findings that name an unknown file or unchanged line", () => {
     expect(mergeFindings([], [aiFinding({ file: "src/invented.ts" })], context, 0.85)).toEqual([]);
     expect(mergeFindings([], [aiFinding({ line: 99 })], context, 0.85)).toEqual([]);
+  });
+
+  it("merges a grounded known finding from a redacted file", () => {
+    const dotenvRule = ruleFinding();
+    dotenvRule.file = ".env.example";
+    dotenvRule.line = 1;
+    dotenvRule.evidence = "AUTH0_CLIENT_ID=[REDACTED]";
+
+    const dotenvAi = aiFinding({
+      file: ".env.example",
+      line: 1,
+      evidence: "AUTH0_CLIENT_ID=[REDACTED]",
+    });
+    const knownContext: AiScanContext = {
+      ...context,
+      knownFindings: [{
+        id: dotenvRule.id,
+        severity: dotenvRule.severity,
+        category: dotenvRule.category,
+        title: dotenvRule.title,
+        file: dotenvRule.file,
+        line: dotenvRule.line,
+        evidence: dotenvRule.evidence,
+      }],
+    };
+
+    expect(mergeFindings([dotenvRule], [dotenvAi], knownContext, 0.85)[0]).toMatchObject({ source: "hybrid" });
   });
 });

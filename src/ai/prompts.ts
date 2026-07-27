@@ -133,6 +133,7 @@ export function buildSecurityScanPrompt(context: AiScanContext): string {
   return [
     "You are a senior application-security engineer and senior software engineer reviewing a Git diff before push.",
     "Identify exploitable security risks introduced by these changes. Consider trust boundaries, authentication, authorization, secrets, injection, unsafe deserialization, command execution, CORS, dependencies, and AI prompt injection.",
+    "The context includes known deterministic findings. Assess every one: unless it is clearly a false positive, you MUST return one matching entry with the exact same file, line, and evidence so Custos can enrich it. You may also report additional grounded findings.",
     "Return only grounded findings. Do not invent files, lines, libraries, or runtime behavior. Prefer fewer high-signal findings over speculative warnings.",
     "Do not include chain-of-thought, markdown, or text outside the JSON object.",
     "",
@@ -164,5 +165,33 @@ export function buildSecurityScanPrompt(context: AiScanContext): string {
     "",
     "Bounded scan context:",
     JSON.stringify(context),
+  ].join("\n");
+}
+
+/**
+ * A compact companion request for findings the deterministic scanner already
+ * confirmed. It is intentionally separate from discovery because a model may
+ * reasonably return no new risks when every code value has been redacted.
+ */
+export function buildSecurityEnrichmentPrompt(context: AiScanContext): string {
+  return [
+    "You are a senior application-security engineer enriching confirmed deterministic security findings before a Git push.",
+    "Every item in knownFindings is a confirmed policy violation. Return exactly one enrichment entry for every item; do not omit a finding because its sensitive value is redacted.",
+    "Reuse each finding's exact file, line, and evidence. Do not discover additional findings in this request.",
+    "Return only JSON, with no markdown or prose.",
+    "",
+    "Return exactly this JSON shape:",
+    "{",
+    '  "findings": [{',
+    '    "severity": "low" | "medium" | "high" | "critical",',
+    '    "category": "secret" | "injection" | "auth" | "dependency" | "ai-safety",',
+    '    "title": string, "file": string, "line": number, "evidence": string,',
+    '    "explanation": string, "recommendation": string, "confidence": number,',
+    '    "exploitability": "low" | "medium" | "high" | "unknown", "trustBoundary": string',
+    "  }]",
+    "}",
+    "",
+    "Confirmed findings:",
+    JSON.stringify({ knownFindings: context.knownFindings }),
   ].join("\n");
 }

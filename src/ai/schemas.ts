@@ -16,6 +16,11 @@ export const findingCategorySchema = z.preprocess(
 );
 export const exploitabilitySchema = z.enum(["low", "medium", "high", "unknown"]);
 
+const normalizeConfidence = (value: unknown): unknown => {
+  const numeric = typeof value === "number" ? value : Number.parseFloat(String(value));
+  return Number.isFinite(numeric) && numeric > 1 && numeric <= 100 ? numeric / 100 : value;
+};
+
 export const explainResponseSchema = z.object({
   risk: severitySchema,
   is_exploitable: z.boolean(),
@@ -43,7 +48,7 @@ export const aiScanFindingSchema = z.object({
   evidence: z.string().trim().min(3).max(2_000),
   explanation: z.string().trim().min(3).max(2_000),
   recommendation: z.string().trim().min(3).max(2_000),
-  confidence: z.coerce.number().min(0).max(1).default(0.75),
+  confidence: z.preprocess(normalizeConfidence, z.coerce.number().min(0).max(1)).default(0.75),
   exploitability: z.preprocess(normalizeEnum, exploitabilitySchema).default("unknown"),
   trustBoundary: z.string().trim().min(3).max(500).optional(),
 });

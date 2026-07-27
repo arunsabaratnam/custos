@@ -282,6 +282,58 @@ describe("runScan — no findings / warnings", () => {
     );
   });
 
+  it("keeps successful AI enrichment when independent discovery fails", async () => {
+    process.env.BACKBOARD_API_KEY = "test-key";
+    process.env.CUSTOS_AI_SCAN = "true";
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          headers: { get: () => null },
+          json: async () => ({
+            content: JSON.stringify({
+              findings: [{
+                severity: "critical",
+                category: "secret",
+                title: "Hardcoded API key detected",
+                file: "vulnerable.ts",
+                line: 1,
+                evidence: 'const OPENAI_API_KEY = "[REDACTED]";',
+                explanation: "The key would be exposed in repository history.",
+                recommendation: "Load the key from the environment and rotate it.",
+                confidence: 98,
+                exploitability: "high",
+                trustBoundary: "source control",
+              }],
+            }),
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          headers: { get: () => null },
+          json: async () => ({ content: JSON.stringify({ unexpected: [] }) }),
+        }) as unknown as typeof fetch,
+    );
+    vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
+    vi.mocked(scanDiff).mockReturnValue([makeFinding()]);
+    vi.mocked(promptFindingAction).mockResolvedValue("abort");
+
+    await runScan({});
+
+    expect(writeAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "finding_detected",
+        finding: expect.objectContaining({ source: "hybrid", confidence: 0.98 }),
+      }),
+    );
+  });
+
   it("--json emits findings and blocks (exit 1) when a blocking finding exists", async () => {
     vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
     vi.mocked(scanDiff).mockReturnValue([makeFinding({ severity: "critical" })]);

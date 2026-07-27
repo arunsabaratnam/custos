@@ -19,6 +19,7 @@ import type { AuditEvent } from "../scanner/types.js";
 type PartialAuditEvent = Partial<AuditEvent> & Pick<AuditEvent, "eventType" | "action" | "createdAt">;
 
 const MODEL_NAME = "AuditEvent";
+let repoMetadataPromise: Promise<Pick<AuditEvent, "repoName" | "repoPathHash" | "branch" | "commitSha">> | null = null;
 
 function auditModel(): Model<AuditEvent> {
   return (
@@ -38,9 +39,16 @@ async function git(args: string[]): Promise<string | undefined> {
 
 /** Collects repo name / privacy-hashed path / branch / commit for the record. */
 async function repoMetadata(): Promise<Pick<AuditEvent, "repoName" | "repoPathHash" | "branch" | "commitSha">> {
-  const repoRoot = (await git(["rev-parse", "--show-toplevel"])) ?? process.cwd();
-  const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
-  const commitSha = await git(["rev-parse", "HEAD"]);
+  if (!repoMetadataPromise) {
+    repoMetadataPromise = loadRepoMetadata();
+  }
+  return repoMetadataPromise;
+}
+
+async function loadRepoMetadata(): Promise<Pick<AuditEvent, "repoName" | "repoPathHash" | "branch" | "commitSha">> {
+  const output = await git(["rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD", "HEAD"]);
+  const [repoRootValue, branch, commitSha] = output?.split("\n") ?? [];
+  const repoRoot = repoRootValue || process.cwd();
 
   return {
     repoName: basename(repoRoot),
@@ -51,8 +59,7 @@ async function repoMetadata(): Promise<Pick<AuditEvent, "repoName" | "repoPathHa
 }
 
 export async function writeAuditEvent(event: PartialAuditEvent): Promise<void> {
-  await connectMongo();
-  const meta = await repoMetadata();
+  const [, meta] = await Promise.all([connectMongo(), repoMetadata()]);
 
   const doc: AuditEvent = {
     ...meta,

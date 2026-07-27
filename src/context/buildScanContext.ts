@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { DiffHunk } from "../scanner/types.js";
+import type { DiffHunk, Finding, FindingCategory, Severity } from "../scanner/types.js";
 
 export type AiScanLimits = {
   maxFiles: number;
@@ -19,9 +19,21 @@ export type AiScanFile = {
 export type AiScanContext = {
   version: 1;
   files: AiScanFile[];
+  knownFindings: AiKnownFinding[];
   dependencyManifest?: { path: string; excerpt: string };
   limits: Pick<AiScanLimits, "maxFindings" | "timeoutMs">;
   omittedFileCount: number;
+};
+
+/** Rule output supplied to Backboard for one-pass enrichment, never a patch. */
+export type AiKnownFinding = {
+  id: string;
+  severity: Severity;
+  category: FindingCategory;
+  title: string;
+  file: string;
+  line?: number;
+  evidence: string;
 };
 
 const DEFAULT_LIMITS: AiScanLimits = {
@@ -50,6 +62,7 @@ export async function buildScanContext(
   hunks: DiffHunk[],
   repoRoot: string | null,
   limits = readAiScanLimits(),
+  findings: Finding[] = [],
 ): Promise<AiScanContext> {
   const byFile = new Map<string, DiffHunk[]>();
   for (const hunk of hunks) {
@@ -66,9 +79,22 @@ export async function buildScanContext(
   return {
     version: 1,
     files,
+    knownFindings: findings.slice(0, limits.maxFindings).map(toKnownFinding),
     ...(await dependencyManifest(repoRoot)),
     limits: { maxFindings: limits.maxFindings, timeoutMs: limits.timeoutMs },
     omittedFileCount: Math.max(0, allFiles.length - selected.length),
+  };
+}
+
+function toKnownFinding(finding: Finding): AiKnownFinding {
+  return {
+    id: finding.id,
+    severity: finding.severity,
+    category: finding.category,
+    title: finding.title,
+    file: finding.file,
+    line: finding.line,
+    evidence: redactSecrets(finding.evidence),
   };
 }
 

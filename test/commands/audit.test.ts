@@ -112,7 +112,21 @@ describe("formatAuditTable", () => {
     const headerLine = output.split("\n").find((line) => line.includes("Commit") && line.includes("Time"));
     expect(headerLine?.indexOf("Commit")).toBeLessThan(headerLine?.indexOf("Time") ?? Number.POSITIVE_INFINITY);
   });
+
+  it("keeps the finding column inside a narrow terminal width", () => {
+    const lines = formatAuditTable([makeEvent()], 100);
+    const output = lines.join("\n");
+    const body = lines.find((line) => line.includes("Hardcoded"));
+
+    expect(output).toContain("Finding");
+    expect(output).not.toContain("dev@example.com");
+    expect(visibleLength(body ?? "")).toBeLessThanOrEqual(100);
+  });
 });
+
+function visibleLength(value: string): number {
+  return value.replace(/\x1b\[[0-9;]*m/g, "").length;
+}
 
 describe("runAudit", () => {
   it("loads and prints recent audit events without paging", async () => {

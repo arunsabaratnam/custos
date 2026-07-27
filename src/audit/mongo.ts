@@ -23,7 +23,9 @@ export async function connectMongo(): Promise<Connection> {
     connectionPromise = mongoose
       .connect(uri, {
         dbName: process.env.MONGODB_DB ?? "custos",
-        serverSelectionTimeoutMS: 5_000,
+        serverSelectionTimeoutMS: 2_500,
+        connectTimeoutMS: 2_500,
+        autoIndex: false,
       })
       .then((m) => {
         connected = true;
@@ -37,6 +39,13 @@ export async function connectMongo(): Promise<Connection> {
   }
 
   return connectionPromise;
+}
+
+/** Starts the connection in the background so scan work can hide Atlas latency. */
+export function warmMongoConnection(): void {
+  void connectMongo().catch(() => {
+    // The eventual audit write reports the integration failure to the user.
+  });
 }
 
 export async function disconnectMongo(): Promise<void> {

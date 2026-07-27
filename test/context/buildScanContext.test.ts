@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildScanContext, readAiScanLimits } from "../../src/context/buildScanContext.js";
-import type { DiffHunk } from "../../src/scanner/types.js";
+import type { DiffHunk, Finding } from "../../src/scanner/types.js";
 
 let tmpDir: string;
 
@@ -55,6 +55,31 @@ describe("buildScanContext", () => {
     expect(JSON.stringify(context)).not.toContain("sk-demo-leaked-key");
     expect(JSON.stringify(context)).not.toContain("top-secret");
     expect(context.dependencyManifest?.excerpt).toContain("express");
+  });
+
+  it("includes a redacted, bounded view of known deterministic findings", async () => {
+    const findings: Finding[] = [{
+      id: "hardcoded-api-key",
+      severity: "critical",
+      category: "secret",
+      title: "Hardcoded API key detected",
+      file: ".env.example",
+      line: 3,
+      evidence: 'BACKBOARD_API_KEY="sk-demo-leaked-key"',
+      explanation: "",
+      recommendation: "",
+      source: "rule",
+    }];
+
+    const context = await buildScanContext([], tmpDir, {
+      maxFiles: 1,
+      maxLinesPerFile: 1,
+      maxFindings: 1,
+      timeoutMs: 5_000,
+    }, findings);
+
+    expect(context.knownFindings).toHaveLength(1);
+    expect(JSON.stringify(context.knownFindings)).not.toContain("sk-demo-leaked-key");
   });
 
   it("uses safe defaults for invalid environment limits", () => {

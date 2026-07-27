@@ -41,7 +41,6 @@ type EffectiveConfig = {
 
 const DEFAULT_BLOCK_ON: Severity[] = ["critical", "high"];
 const DEFAULT_AI_BLOCK_ON: Severity[] = ["critical"];
-const SEVERITY_RANK: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
 
 /**
  * `custos scan` — orchestrates the full core loop (AGENTS.md "custos scan"):
@@ -56,6 +55,10 @@ export async function runScan(options: ScanOptions): Promise<void> {
 
   try {
     const config = await resolveEffectiveConfig();
+    if (config.auditEnabled) {
+      const { warmMongoConnection } = await import("../audit/mongo.js");
+      warmMongoConnection();
+    }
 
     // Git pipes ref-pair lines on stdin in pre-push mode. Newer Custos hooks
     // write those lines to CUSTOS_PRE_PUSH_STDIN_FILE and give this process
@@ -90,11 +93,27 @@ export async function runScan(options: ScanOptions): Promise<void> {
       const aiLimits = readAiScanLimits();
       try {
         const runAiReview = async (): Promise<Finding[]> => {
-          const enriched = await enrichRuleFindings(ruleFindings, hunks, aiLimits.maxFindings);
-          const context = await buildScanContext(hunks, config.repoRoot, aiLimits);
-          const { reviewSecurityContext } = await import("../ai/backboardClient.js");
-          const aiResult = await reviewSecurityContext(context);
-          return mergeFindings(enriched, aiResult.findings, context, config.aiMinConfidence);
+          const context = await buildScanContext(hunks, config.repoRoot, aiLimits, ruleFindings);
+          const { enrichSecurityFindings, reviewSecurityContext } = await import("../ai/backboardClient.js");
+          const results = await Promise.allSettled([
+            enrichSecurityFindings(context),
+            reviewSecurityContext(context),
+          ]);
+          const [enrichmentResult, discoveryResult] = results;
+          const completed = results
+            .filter((result): result is PromiseFulfilledResult<{ findings: import("../ai/schemas.js").AiScanFinding[] }> => result.status === "fulfilled")
+            .flatMap((result) => result.value.findings);
+
+          if (completed.length === 0 && enrichmentResult?.status === "rejected" && discoveryResult?.status === "rejected") {
+            throw enrichmentResult.reason;
+          }
+
+          return mergeFindings(
+            ruleFindings,
+            completed,
+            context,
+            config.aiMinConfidence,
+          );
         };
 
         findings = json
@@ -154,15 +173,17 @@ export async function runScan(options: ScanOptions): Promise<void> {
 
     await renderBanner();
 
+    const findingAuditWrites: Array<Promise<boolean>> = [];
     for (const finding of findings) {
       renderFinding(finding);
-      await tryWriteAudit(config.auditEnabled, {
+      findingAuditWrites.push(tryWriteAudit(config.auditEnabled, {
         eventType: "finding_detected",
         finding,
         action: isBlockingFinding(finding, config) ? "blocked" : "allowed",
         createdAt: new Date(),
-      });
+      }));
     }
+    await Promise.all(findingAuditWrites);
 
     const blocking = findings.filter((finding) => isBlockingFinding(finding, config));
 
@@ -664,14 +685,12 @@ async function tryWriteAudit(auditEnabled: boolean, event: Record<string, unknow
 }
 
 async function auditBlockedFindings(auditEnabled: boolean, findings: Finding[]): Promise<void> {
-  for (const finding of findings) {
-    await tryWriteAudit(auditEnabled, {
+  await Promise.all(findings.map((finding) => tryWriteAudit(auditEnabled, {
       eventType: "finding_blocked",
       finding,
       action: "blocked",
       createdAt: new Date(),
-    });
-  }
+    })));
 }
 
 async function tryGeneratePatch(finding: Finding, hunk: DiffHunk): Promise<string | null> {
@@ -685,47 +704,6 @@ async function tryGeneratePatch(finding: Finding, hunk: DiffHunk): Promise<strin
   } catch {
     return null;
   }
-}
-
-/**
- * Enrich existing deterministic matches one at a time. This gives the user
- * Backboard's security rationale without making the local scanner dependent
- * on AI success or sending more than the configured finding cap.
- */
-async function enrichRuleFindings(
-  findings: Finding[],
-  hunks: DiffHunk[],
-  maxFindings: number,
-): Promise<Finding[]> {
-  if (findings.length === 0) return findings;
-
-  const enriched = [...findings];
-  const { explainFinding } = await import("../ai/backboardClient.js");
-
-  for (let index = 0; index < enriched.length && index < maxFindings; index++) {
-    const finding = enriched[index]!;
-    const hunk = hunks.find((candidate) => candidate.file === finding.file);
-    if (!hunk) continue;
-
-    try {
-      const analysis = await explainFinding(finding, hunk);
-      enriched[index] = {
-        ...finding,
-        severity: higherSeverity(finding.severity, analysis.risk),
-        explanation: analysis.summary,
-        recommendation: analysis.recommendation,
-        source: "hybrid",
-        aiAnalysis: {
-          assessedRisk: analysis.risk,
-          isExploitable: analysis.is_exploitable,
-        },
-      };
-    } catch {
-      // Rule findings remain authoritative when an individual AI call fails.
-    }
-  }
-
-  return enriched;
 }
 
 /** Reject patches that cannot be a direct replacement for the matched evidence. */
@@ -743,10 +721,6 @@ function isBlockingFinding(finding: Finding, config: EffectiveConfig): boolean {
     return (finding.confidence ?? 0) >= config.aiMinConfidence && config.aiBlockOn.includes(finding.severity);
   }
   return config.blockOn.includes(finding.severity);
-}
-
-function higherSeverity(a: Severity, b: Severity): Severity {
-  return SEVERITY_RANK[b] > SEVERITY_RANK[a] ? b : a;
 }
 
 async function tryOverride(
