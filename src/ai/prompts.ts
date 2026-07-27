@@ -10,6 +10,7 @@
  *   CUSTOS_EXPLAIN_PROVIDER / CUSTOS_EXPLAIN_MODEL
  *   CUSTOS_PATCH_PROVIDER   / CUSTOS_PATCH_MODEL
  */
+import type { AiScanContext } from "../context/buildScanContext.js";
 import type { DiffHunk, Finding } from "../scanner/types.js";
 
 export type ModelSelection = {
@@ -36,6 +37,14 @@ export function getPatchModel(): ModelSelection {
   return {
     llm_provider: process.env.CUSTOS_PATCH_PROVIDER ?? "anthropic",
     model_name: process.env.CUSTOS_PATCH_MODEL ?? "claude-sonnet-4-6",
+  };
+}
+
+/** Fast, structured independent scan. The exact model remains configurable. */
+export function getSecurityScanModel(): ModelSelection {
+  return {
+    llm_provider: process.env.CUSTOS_AI_SCAN_PROVIDER ?? "openai",
+    model_name: process.env.CUSTOS_AI_SCAN_MODEL ?? "gpt-4o-mini",
   };
 }
 
@@ -99,6 +108,8 @@ export function buildPatchPrompt(context: BackboardPromptContext): string {
     "",
     "Rules:",
     "- Change as little as possible; preserve surrounding style, indentation, and formatting.",
+    "- Return only the exact replacement text for finding.evidence. Do not return file headers, comments, surrounding configuration, or a whole file.",
+    "- If a safe one-to-one replacement is not possible, return an empty patch and explain the manual remediation.",
     "- The patch must be drop-in valid code for the given language.",
     "- Do not introduce new dependencies or placeholders like TODO.",
     "- For secrets, read from environment/config instead of literals.",
@@ -111,4 +122,47 @@ export function buildPatchPrompt(context: BackboardPromptContext): string {
     snippet(context),
   ];
   return instructions.join("\n");
+}
+
+/**
+ * The context is constructed locally and already redacted. Do not add broad
+ * repository-reading or network/tool instructions here; this call must stay
+ * bounded, deterministic in shape, and suitable for a pre-push hook.
+ */
+export function buildSecurityScanPrompt(context: AiScanContext): string {
+  return [
+    "You are a senior application-security engineer and senior software engineer reviewing a Git diff before push.",
+    "Identify exploitable security risks introduced by these changes. Consider trust boundaries, authentication, authorization, secrets, injection, unsafe deserialization, command execution, CORS, dependencies, and AI prompt injection.",
+    "Return only grounded findings. Do not invent files, lines, libraries, or runtime behavior. Prefer fewer high-signal findings over speculative warnings.",
+    "Do not include chain-of-thought, markdown, or text outside the JSON object.",
+    "",
+    "Return exactly this JSON shape:",
+    "{",
+    '  "findings": [',
+    "    {",
+    '      "severity": "low" | "medium" | "high" | "critical",',
+    '      "category": "secret" | "injection" | "auth" | "dependency" | "ai-safety",',
+    '      "title": string,',
+    '      "file": string,',
+    '      "line": number,',
+    '      "evidence": string,',
+    '      "explanation": string,',
+    '      "recommendation": string,',
+    '      "confidence": number,',
+    '      "exploitability": "low" | "medium" | "high" | "unknown",',
+    '      "trustBoundary": string',
+    "    }",
+    "  ]",
+    "}",
+    "",
+    "Rules:",
+    "- Each file and line must be present in the supplied context. Prefer changed lines for evidence.",
+    "- Do not reconstruct, reveal, or request secret values; redacted values are intentionally unavailable.",
+    "- Only report a finding when evidence supports a realistic exploit path.",
+    "- Keep explanations and recommendations concise, concrete, and compatible with the existing code style.",
+    `- Return at most ${context.limits.maxFindings} findings. Return an empty array when no grounded issue exists.`,
+    "",
+    "Bounded scan context:",
+    JSON.stringify(context),
+  ].join("\n");
 }

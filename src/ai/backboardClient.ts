@@ -1,15 +1,21 @@
+import { z } from "zod";
 import type { DiffHunk, Finding } from "../scanner/types.js";
+import { redactSecrets, type AiScanContext } from "../context/buildScanContext.js";
 import {
+  aiScanResponseSchema,
   explainResponseSchema,
   patchResponseSchema,
+  type AiScanResponse,
   type ExplainResponse,
   type PatchResponse,
 } from "./schemas.js";
 import {
   buildExplainPrompt,
   buildPatchPrompt,
+  buildSecurityScanPrompt,
   getExplainModel,
   getPatchModel,
+  getSecurityScanModel,
   type BackboardPromptContext,
 } from "./prompts.js";
 
@@ -33,13 +39,25 @@ type BackboardCall = {
   llm_provider: string;
   model_name: string;
   json_output: true;
+  assistant_id?: string;
+  memory?: "off";
+  web_search?: "off";
+  metadata?: Record<string, unknown>;
 };
 
 function ruleContext(finding: Finding, hunk: DiffHunk): BackboardPromptContext {
-  return { finding, hunk, ruleName: finding.id };
+  return {
+    finding: { ...finding, evidence: redactSecrets(finding.evidence) },
+    hunk: {
+      ...hunk,
+      addedLines: hunk.addedLines.map((line) => ({ ...line, content: redactSecrets(line.content) })),
+      context: redactSecrets(hunk.context),
+    },
+    ruleName: finding.id,
+  };
 }
 
-async function callBackboard(body: BackboardCall): Promise<unknown> {
+async function callBackboard(body: BackboardCall, timeoutMs = REQUEST_TIMEOUT_MS): Promise<unknown> {
   const apiKey = process.env.BACKBOARD_API_KEY;
   if (!apiKey) {
     throw new Error("BACKBOARD_API_KEY is not set");
@@ -47,27 +65,36 @@ async function callBackboard(body: BackboardCall): Promise<unknown> {
 
   const baseUrl = (process.env.BACKBOARD_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(`${baseUrl}/threads/messages`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": apiKey,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await fetch(`${baseUrl}/threads/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": apiKey,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
 
-    if (!res.ok) {
-      throw new Error(`Backboard responded ${res.status} ${res.statusText}`);
+      if (res.ok) {
+        return await res.json();
+      }
+
+      const retryable = res.status === 429 || res.status >= 500;
+      if (!retryable || attempt === 1) {
+        throw new Error(`Backboard responded ${res.status} ${res.statusText}`);
+      }
+
+      await delay(retryDelayMs(res.headers.get("retry-after")));
     }
-
-    return await res.json();
   } finally {
     clearTimeout(timeout);
   }
+
+  throw new Error("Backboard request failed without a response");
 }
 
 /**
@@ -83,13 +110,7 @@ function extractPayload(raw: unknown): unknown {
 
     if (typeof value === "string") {
       const trimmed = value.trim();
-      if (trimmed.startsWith("{")) {
-        try {
-          candidates.push(JSON.parse(trimmed));
-        } catch {
-          // not JSON — ignore
-        }
-      }
+      for (const candidate of parseJsonCandidates(trimmed)) candidates.push(candidate);
       return;
     }
 
@@ -109,14 +130,65 @@ function extractPayload(raw: unknown): unknown {
   return candidates;
 }
 
-function parseWith<T>(schema: { safeParse: (v: unknown) => { success: boolean; data?: T } }, raw: unknown): T {
+/** Handles strict JSON, fenced JSON, and a JSON object surrounded by prose. */
+function parseJsonCandidates(value: string): unknown[] {
+  const candidates: unknown[] = [];
+  const sources = [
+    value,
+    ...[...value.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((match) => match[1]!.trim()),
+  ];
+
+  for (const source of sources) {
+    try {
+      candidates.push(JSON.parse(source));
+      continue;
+    } catch {
+      // Try extracting the outermost JSON object from surrounding prose.
+    }
+
+    const start = source.indexOf("{");
+    const end = source.lastIndexOf("}");
+    if (start === -1 || end <= start) continue;
+
+    try {
+      candidates.push(JSON.parse(source.slice(start, end + 1)));
+    } catch {
+      // The caller will produce the normal schema mismatch fallback.
+    }
+  }
+
+  return candidates;
+}
+
+function parseWith<T>(schema: z.ZodTypeAny, raw: unknown): T {
+  const issues: string[] = [];
   for (const candidate of extractPayload(raw) as unknown[]) {
     const result = schema.safeParse(candidate);
     if (result.success && result.data !== undefined) {
-      return result.data;
+      return result.data as T;
     }
+    const failure = result as { success: false; error: z.ZodError };
+    issues.push(
+      failure.error.issues
+        .slice(0, 3)
+        .map((issue) => `${issue.path.join(".") || "response"}: ${issue.message}`)
+        .join("; "),
+    );
   }
-  throw new Error("Backboard response did not match the expected schema");
+  const detail = issues.find(Boolean);
+  throw new Error(`Backboard response did not match the expected schema${detail ? ` (${detail})` : ""}`);
+}
+
+function retryDelayMs(retryAfter: string | null): number {
+  const seconds = Number.parseFloat(retryAfter ?? "");
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.min(Math.ceil(seconds * 1_000), 5_000);
+  }
+  return 500;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function explainFinding(finding: Finding, hunk: DiffHunk): Promise<ExplainResponse> {
@@ -128,6 +200,8 @@ export async function explainFinding(finding: Finding, hunk: DiffHunk): Promise<
     llm_provider: model.llm_provider,
     model_name: model.model_name,
     json_output: true,
+    memory: "off",
+    web_search: "off",
   });
   return parseWith<ExplainResponse>(explainResponseSchema, raw);
 }
@@ -141,6 +215,31 @@ export async function generatePatch(finding: Finding, hunk: DiffHunk): Promise<P
     llm_provider: model.llm_provider,
     model_name: model.model_name,
     json_output: true,
+    memory: "off",
+    web_search: "off",
   });
   return parseWith<PatchResponse>(patchResponseSchema, raw);
+}
+
+/** Runs one bounded, structured security review for the entire outgoing diff. */
+export async function reviewSecurityContext(context: AiScanContext): Promise<AiScanResponse> {
+  const model = getSecurityScanModel();
+  // Keep structured scans separate from a general assistant. This avoids
+  // attached RAG documents or tools influencing JSON-only security reviews.
+  const scanAssistantId = process.env.BACKBOARD_SCAN_ASSISTANT_ID;
+  const raw = await callBackboard(
+    {
+      content: "Review this bounded Git diff context for newly introduced security vulnerabilities.",
+      system_prompt: buildSecurityScanPrompt(context),
+      llm_provider: model.llm_provider,
+      model_name: model.model_name,
+      json_output: true,
+      ...(scanAssistantId ? { assistant_id: scanAssistantId } : {}),
+      memory: "off",
+      web_search: "off",
+      metadata: { source: "custos-security-scan", context_version: context.version },
+    },
+    context.limits.timeoutMs,
+  );
+  return parseWith<AiScanResponse>(aiScanResponseSchema, raw);
 }

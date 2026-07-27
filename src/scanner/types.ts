@@ -1,9 +1,18 @@
 export type Severity = "low" | "medium" | "high" | "critical";
 
+export type FindingCategory = "secret" | "injection" | "auth" | "dependency" | "ai-safety";
+export type FindingSource = "rule" | "ai" | "hybrid";
+export type Exploitability = "low" | "medium" | "high" | "unknown";
+
+export type AiAnalysis = {
+  assessedRisk: Severity;
+  isExploitable: boolean;
+};
+
 export type Finding = {
   id: string;
   severity: Severity;
-  category: "secret" | "injection" | "auth" | "dependency" | "ai-safety";
+  category: FindingCategory;
   title: string;
   file: string;
   line?: number;
@@ -11,7 +20,13 @@ export type Finding = {
   explanation: string;
   recommendation: string;
   patch?: string;
-  source: "rule" | "ai" | "hybrid";
+  source: FindingSource;
+  /** Present for Backboard-originated analysis; deterministic rules are authoritative without it. */
+  confidence?: number;
+  exploitability?: Exploitability;
+  trustBoundary?: string;
+  /** Assessment from Backboard when it enriches a deterministic finding. */
+  aiAnalysis?: AiAnalysis;
 };
 
 export type DiffHunk = {

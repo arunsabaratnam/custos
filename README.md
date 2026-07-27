@@ -109,6 +109,9 @@ CUSTOS_ALLOW_OVERRIDE=false
 
 BACKBOARD_API_KEY=
 BACKBOARD_BASE_URL=https://app.backboard.io/api
+# Optional: a dedicated Backboard assistant with no attached documents or tools.
+# BACKBOARD_ASSISTANT_ID is deliberately not used for structured security scans.
+BACKBOARD_SCAN_ASSISTANT_ID=
 ```
 
 Do not commit real `.env` files or secrets.

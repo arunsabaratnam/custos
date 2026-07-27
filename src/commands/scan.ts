@@ -6,7 +6,9 @@ import chalk from "chalk";
 import { execa } from "execa";
 import { getDiff } from "../git/getDiff.js";
 import { parseDiff } from "../git/parseDiff.js";
+import { buildScanContext, readAiScanLimits } from "../context/buildScanContext.js";
 import { scanDiff } from "../scanner/scanDiff.js";
+import { mergeFindings } from "../scanner/mergeFindings.js";
 import type { DiffHunk, Finding, Severity } from "../scanner/types.js";
 import { renderFinding } from "../ui/renderFinding.js";
 import { renderBanner } from "../ui/banner.js";
@@ -25,7 +27,11 @@ export type ScanOptions = {
 
 type EffectiveConfig = {
   blockOn: Severity[];
-  aiEnabled: boolean;
+  aiScanEnabled: boolean;
+  aiRequired: boolean;
+  aiBlockOn: Severity[];
+  aiMinConfidence: number;
+  aiPatchesEnabled: boolean;
   auditEnabled: boolean;
   authEnabled: boolean;
   allowOverride: boolean;
@@ -34,13 +40,8 @@ type EffectiveConfig = {
 };
 
 const DEFAULT_BLOCK_ON: Severity[] = ["critical", "high"];
-
+const DEFAULT_AI_BLOCK_ON: Severity[] = ["critical"];
 const SEVERITY_RANK: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
-
-/** Returns the higher of two severities (AI enrichment can never downgrade). */
-function maxSeverity(a: Severity, b: Severity): Severity {
-  return SEVERITY_RANK[b] > SEVERITY_RANK[a] ? b : a;
-}
 
 /**
  * `custos scan` — orchestrates the full core loop (AGENTS.md "custos scan"):
@@ -82,7 +83,53 @@ export async function runScan(options: ScanOptions): Promise<void> {
     }
 
     const hunks = parseDiff(rawDiff);
-    let findings = scanDiff(hunks);
+    const ruleFindings = scanDiff(hunks);
+    let findings = ruleFindings;
+
+    if (config.aiScanEnabled) {
+      const aiLimits = readAiScanLimits();
+      try {
+        const runAiReview = async (): Promise<Finding[]> => {
+          const enriched = await enrichRuleFindings(ruleFindings, hunks, aiLimits.maxFindings);
+          const context = await buildScanContext(hunks, config.repoRoot, aiLimits);
+          const { reviewSecurityContext } = await import("../ai/backboardClient.js");
+          const aiResult = await reviewSecurityContext(context);
+          return mergeFindings(enriched, aiResult.findings, context, config.aiMinConfidence);
+        };
+
+        findings = json
+          ? await runAiReview()
+          : await withSpinner("think", "Reviewing changes with Backboard AI...", runAiReview);
+      } catch (err) {
+        const message = (err as Error).message;
+        if (config.aiRequired && prePush) {
+          if (!json) {
+            console.error(chalk.red(`[custos] Required Backboard security scan failed: ${message}`));
+          }
+          await tryWriteAudit(config.auditEnabled, {
+            eventType: "finding_blocked",
+            action: "blocked",
+            createdAt: new Date(),
+          });
+          process.exitCode = 1;
+          return;
+        }
+        if (!json) {
+          console.error(chalk.dim(`[custos] Backboard security scan skipped: ${message}`));
+        }
+      }
+    } else if (config.aiRequired && prePush) {
+      if (!json) {
+        console.error(chalk.red("[custos] Required Backboard security scan is enabled but BACKBOARD_API_KEY is not configured."));
+      }
+      await tryWriteAudit(config.auditEnabled, {
+        eventType: "finding_blocked",
+        action: "blocked",
+        createdAt: new Date(),
+      });
+      process.exitCode = 1;
+      return;
+    }
 
     if (findings.length === 0) {
       if (json) {
@@ -99,15 +146,9 @@ export async function runScan(options: ScanOptions): Promise<void> {
       return;
     }
 
-    // AI enrichment — optional, skipped entirely if Backboard isn't
-    // configured. Never allowed to change whether the push is blocked.
-    if (config.aiEnabled && !json) {
-      findings = await enrichFindings(findings, hunks);
-    }
-
     if (json) {
       console.log(JSON.stringify(findings, null, 2));
-      process.exitCode = findings.some((f) => config.blockOn.includes(f.severity)) ? 1 : 0;
+      process.exitCode = findings.some((finding) => isBlockingFinding(finding, config)) ? 1 : 0;
       return;
     }
 
@@ -118,12 +159,12 @@ export async function runScan(options: ScanOptions): Promise<void> {
       await tryWriteAudit(config.auditEnabled, {
         eventType: "finding_detected",
         finding,
-        action: config.blockOn.includes(finding.severity) ? "blocked" : "allowed",
+        action: isBlockingFinding(finding, config) ? "blocked" : "allowed",
         createdAt: new Date(),
       });
     }
 
-    const blocking = findings.filter((f) => config.blockOn.includes(f.severity));
+    const blocking = findings.filter((finding) => isBlockingFinding(finding, config));
 
     if (blocking.length === 0) {
       console.log(chalk.yellow("\n⚠ Warnings detected. Push allowed."));
@@ -250,7 +291,19 @@ async function resolveFindingActions(
 }
 
 function canApplyPatch(finding: Finding, hunks: DiffHunk[], config: EffectiveConfig): boolean {
-  return Boolean(finding.patch) || (config.aiEnabled && hunks.some((hunk) => hunk.file === finding.file));
+  if (finding.patch) return true;
+
+  return (
+    config.aiPatchesEnabled &&
+    isAiPatchEligible(finding) &&
+    hunks.some((hunk) => hunk.file === finding.file)
+  );
+}
+
+/** Findings involving tracked environment files require a Git action, not a source replacement. */
+function isAiPatchEligible(finding: Finding): boolean {
+  const fileName = finding.file.replace(/\\/g, "/").split("/").pop() ?? "";
+  return fileName !== ".env";
 }
 
 function renderTechnicalDetails(finding: Finding): void {
@@ -261,6 +314,22 @@ function renderTechnicalDetails(finding: Finding): void {
   console.log(`${chalk.bold("Category:")} ${finding.category}`);
   console.log(`${chalk.bold("Source:")} ${finding.source}`);
   console.log(`${chalk.bold("File:")} ${finding.file}${finding.line ? `:${finding.line}` : ""}`);
+  if (finding.source !== "rule") {
+    console.log(chalk.bold("\nBackboard analysis:"));
+    if (finding.aiAnalysis) {
+      console.log(`${chalk.bold("Assessed risk:")} ${finding.aiAnalysis.assessedRisk}`);
+      console.log(`${chalk.bold("Exploitable:")} ${finding.aiAnalysis.isExploitable ? "yes" : "no"}`);
+    }
+    if (finding.confidence !== undefined) {
+      console.log(`${chalk.bold("Confidence:")} ${Math.round(finding.confidence * 100)}%`);
+    }
+    if (finding.exploitability) {
+      console.log(`${chalk.bold("Exploitability:")} ${finding.exploitability}`);
+    }
+    if (finding.trustBoundary) {
+      console.log(`${chalk.bold("Trust boundary:")} ${finding.trustBoundary}`);
+    }
+  }
   console.log(chalk.bold("\nEvidence:"));
   console.log(chalk.dim(finding.evidence));
   console.log(chalk.bold("\nRecommendation:"));
@@ -430,9 +499,15 @@ async function resolveEffectiveConfig(): Promise<EffectiveConfig> {
 
     if (fileConfig) {
       const authEnabled = fileConfig.auth.enabled || parseBooleanEnv(process.env.CUSTOS_ALLOW_OVERRIDE, false);
+      const aiRequested = fileConfig.ai.enabled && parseBooleanEnv(process.env.CUSTOS_AI_SCAN, true);
+      const aiConfigured = Boolean(process.env.BACKBOARD_API_KEY);
       return {
         blockOn: fileConfig.blockingThreshold as Severity[],
-        aiEnabled: fileConfig.ai.enabled && Boolean(process.env.BACKBOARD_API_KEY),
+        aiScanEnabled: aiRequested && aiConfigured,
+        aiRequired: aiRequested && parseBooleanEnv(process.env.CUSTOS_AI_REQUIRED, false),
+        aiBlockOn: parseSeverityEnv(process.env.CUSTOS_AI_BLOCK_ON, DEFAULT_AI_BLOCK_ON),
+        aiMinConfidence: parseConfidenceEnv(process.env.CUSTOS_AI_MIN_CONFIDENCE),
+        aiPatchesEnabled: fileConfig.ai.enabled && aiConfigured && parseBooleanEnv(process.env.CUSTOS_AI_PATCHES, true),
         auditEnabled: fileConfig.audit.enabled,
         authEnabled,
         allowOverride: authEnabled && hasAuth0Config(),
@@ -444,9 +519,15 @@ async function resolveEffectiveConfig(): Promise<EffectiveConfig> {
     // Not a Git repo, or config unreadable — fall back to env vars/defaults.
   }
 
+  const aiRequested = parseBooleanEnv(process.env.CUSTOS_AI_SCAN, true);
+  const aiConfigured = Boolean(process.env.BACKBOARD_API_KEY);
   return {
     blockOn: parseBlockOnEnv(),
-    aiEnabled: process.env.CUSTOS_AI_PATCHES !== "false" && Boolean(process.env.BACKBOARD_API_KEY),
+    aiScanEnabled: aiRequested && aiConfigured,
+    aiRequired: aiRequested && parseBooleanEnv(process.env.CUSTOS_AI_REQUIRED, false),
+    aiBlockOn: parseSeverityEnv(process.env.CUSTOS_AI_BLOCK_ON, DEFAULT_AI_BLOCK_ON),
+    aiMinConfidence: parseConfidenceEnv(process.env.CUSTOS_AI_MIN_CONFIDENCE),
+    aiPatchesEnabled: aiConfigured && parseBooleanEnv(process.env.CUSTOS_AI_PATCHES, true),
     auditEnabled: process.env.CUSTOS_AUDIT_ENABLED !== "false",
     authEnabled: parseBooleanEnv(process.env.CUSTOS_ALLOW_OVERRIDE, false),
     allowOverride: parseBooleanEnv(process.env.CUSTOS_ALLOW_OVERRIDE, false) && hasAuth0Config(),
@@ -456,15 +537,22 @@ async function resolveEffectiveConfig(): Promise<EffectiveConfig> {
 }
 
 function parseBlockOnEnv(): Severity[] {
-  const raw = process.env.CUSTOS_BLOCK_ON;
-  if (!raw) return DEFAULT_BLOCK_ON;
+  return parseSeverityEnv(process.env.CUSTOS_BLOCK_ON, DEFAULT_BLOCK_ON);
+}
 
+function parseSeverityEnv(raw: string | undefined, fallback: Severity[]): Severity[] {
+  if (!raw) return fallback;
   const parsed = raw
     .split(",")
     .map((s) => s.trim())
     .filter((s): s is Severity => ["low", "medium", "high", "critical"].includes(s));
 
-  return parsed.length > 0 ? parsed : DEFAULT_BLOCK_ON;
+  return parsed.length > 0 ? parsed : fallback;
+}
+
+function parseConfidenceEnv(value: string | undefined): number {
+  const confidence = Number.parseFloat(value ?? "");
+  return Number.isFinite(confidence) && confidence >= 0 && confidence <= 1 ? confidence : 0.85;
 }
 
 function parseBooleanEnv(value: string | undefined, fallback: boolean): boolean {
@@ -586,46 +674,79 @@ async function auditBlockedFindings(auditEnabled: boolean, findings: Finding[]):
   }
 }
 
-async function enrichFindings(findings: Finding[], hunks: DiffHunk[]): Promise<Finding[]> {
-  return withSpinner("think", "Enriching findings with Backboard AI...", async () => {
-    const enriched: Finding[] = [];
-
-    for (const finding of findings) {
-      const hunk = hunks.find((h) => h.file === finding.file);
-      if (!hunk) {
-        enriched.push(finding);
-        continue;
-      }
-
-      try {
-        const { explainFinding } = await import("../ai/backboardClient.js");
-        const result = await explainFinding(finding, hunk);
-        enriched.push({
-          ...finding,
-          // AI may raise severity but never lower it — a downgrade must not
-          // be able to flip a rule's critical finding into an allowed push.
-          severity: maxSeverity(finding.severity, result.risk),
-          explanation: result.summary,
-          recommendation: result.recommendation,
-          source: "hybrid",
-        });
-      } catch {
-        enriched.push(finding);
-      }
-    }
-
-    return enriched;
-  }).catch(() => findings);
-}
-
 async function tryGeneratePatch(finding: Finding, hunk: DiffHunk): Promise<string | null> {
+  if (!isAiPatchEligible(finding)) return null;
+
   try {
     const { generatePatch } = await import("../ai/backboardClient.js");
     const result = await generatePatch(finding, hunk);
-    return result.patch;
+    const patch = result.patch.trim();
+    return isSafeGeneratedPatch(finding, patch) ? patch : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Enrich existing deterministic matches one at a time. This gives the user
+ * Backboard's security rationale without making the local scanner dependent
+ * on AI success or sending more than the configured finding cap.
+ */
+async function enrichRuleFindings(
+  findings: Finding[],
+  hunks: DiffHunk[],
+  maxFindings: number,
+): Promise<Finding[]> {
+  if (findings.length === 0) return findings;
+
+  const enriched = [...findings];
+  const { explainFinding } = await import("../ai/backboardClient.js");
+
+  for (let index = 0; index < enriched.length && index < maxFindings; index++) {
+    const finding = enriched[index]!;
+    const hunk = hunks.find((candidate) => candidate.file === finding.file);
+    if (!hunk) continue;
+
+    try {
+      const analysis = await explainFinding(finding, hunk);
+      enriched[index] = {
+        ...finding,
+        severity: higherSeverity(finding.severity, analysis.risk),
+        explanation: analysis.summary,
+        recommendation: analysis.recommendation,
+        source: "hybrid",
+        aiAnalysis: {
+          assessedRisk: analysis.risk,
+          isExploitable: analysis.is_exploitable,
+        },
+      };
+    } catch {
+      // Rule findings remain authoritative when an individual AI call fails.
+    }
+  }
+
+  return enriched;
+}
+
+/** Reject patches that cannot be a direct replacement for the matched evidence. */
+function isSafeGeneratedPatch(finding: Finding, patch: string): boolean {
+  if (!patch || patch.includes("```")) return false;
+  if (patch.split("\n").length !== finding.evidence.split("\n").length) return false;
+
+  const sourceKey = finding.evidence.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/)?.[1];
+  const patchKey = patch.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/)?.[1];
+  return !sourceKey || sourceKey === patchKey;
+}
+
+function isBlockingFinding(finding: Finding, config: EffectiveConfig): boolean {
+  if (finding.source === "ai") {
+    return (finding.confidence ?? 0) >= config.aiMinConfidence && config.aiBlockOn.includes(finding.severity);
+  }
+  return config.blockOn.includes(finding.severity);
+}
+
+function higherSeverity(a: Severity, b: Severity): Severity {
+  return SEVERITY_RANK[b] > SEVERITY_RANK[a] ? b : a;
 }
 
 async function tryOverride(

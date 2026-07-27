@@ -154,3 +154,38 @@ Each entry should include:
 - Imports/dependencies: `src/ui/prompts.ts` now imports `Finding` for issue rendering and `severityColor` for severity-colored issue rows; no package dependencies changed.
 - Verification: Ran `npm run typecheck`, `npm run lint`, `npm run build`, focused `npm test -- --run test/commands/scan.test.ts test/ui/prompts.test.ts`, and full `npm test` outside the sandbox because sandboxed CLI subprocess tests hit `tsx` IPC `listen EPERM`.
 - Follow-ups: Manually exercise a real terminal scan with two different findings before demo to tune wording and spacing if needed.
+
+## 2026-07-26 — Add Backboard independent security review
+
+- Summary: Promoted Backboard from per-rule explanation enrichment to a bounded, independent security-review stage that runs alongside deterministic rules.
+- Affected files: `src/context/buildScanContext.ts`, `src/ai/backboardClient.ts`, `src/ai/prompts.ts`, `src/ai/schemas.ts`, `src/scanner/mergeFindings.ts`, `src/scanner/types.ts`, `src/commands/scan.ts`, `test/context/buildScanContext.test.ts`, `test/scanner/mergeFindings.test.ts`, `test/ai/backboardClient.test.ts`, `test/commands/scan.test.ts`, `MEMORY.md`.
+- Functionality: Every non-empty diff can now be sent once to Backboard as a redacted, bounded structured review. Context excludes `.env`/key files, redacts secrets, caps changed files and lines, and includes a small dependency-manifest excerpt. AI results require Zod validation and must name a supplied file/line/evidence before becoming findings. Rule and AI matches merge as `hybrid` without weakening rule severity; AI-only findings carry confidence, exploitability, and trust-boundary metadata, and low-confidence AI-only findings are capped at `medium`. `CUSTOS_AI_BLOCK_ON` controls AI-only blocking independently of deterministic `CUSTOS_BLOCK_ON`; `CUSTOS_AI_REQUIRED=true` blocks pre-push only when the configured AI scan cannot complete. The Backboard client uses `BACKBOARD_ASSISTANT_ID` when set, disables memory/web search, honors `CUSTOS_AI_TIMEOUT_MS`, and retries one `429`/`5xx` response.
+- Imports/dependencies: Added only Node built-ins (`node:fs/promises`, `node:path`, `node:crypto`) and existing project dependencies (`zod`, `fetch`). No package dependency changes were made by this implementation.
+- Verification: Ran `npm run typecheck`, `npm run lint`, `npm run build`, focused AI/context/merge/scan tests, then the full suite outside the sandbox due `tsx` IPC restrictions: `npm test` passed with 17 files and 98 tests.
+- Follow-ups: Run one real pre-push scan with a rotated Backboard key and an assistant that has no RAG documents/tools attached to preserve JSON output. Add curated evaluation fixtures before enabling `CUSTOS_AI_REQUIRED=true` or broad AI-only blocking.
+
+## 2026-07-26 — Tolerate Backboard response formatting
+
+- Summary: Hardened Backboard response parsing after a real scan fell back with `Backboard response did not match the expected schema`.
+- Affected files: `src/ai/schemas.ts`, `src/ai/backboardClient.ts`, `test/ai/backboardClient.test.ts`, `MEMORY.md`.
+- Functionality: AI scan responses now accept strict JSON, fenced JSON, or JSON surrounded by short prose; numeric `line` and `confidence` values are coerced; omitted `exploitability` defaults to `unknown`; existing file/line/evidence grounding still rejects unsupported findings.
+- Verification: Ran `npm run typecheck`, `npm run lint`, and Backboard/merge focused tests: 9 tests passed.
+- Follow-ups: If the configured assistant has RAG documents or tools attached, keep a clean assistant for the structured scan because Backboard may ignore `json_output` in those modes.
+
+## 2026-07-26 — Isolate Backboard scan assistant and protect patch flow
+
+- Summary: Kept structured Backboard security reviews separate from general-purpose assistants and removed unsafe environment-file patch behavior.
+- Affected files: `src/ai/backboardClient.ts`, `src/ai/prompts.ts`, `src/commands/scan.ts`, `src/ui/activity.ts`, `README.md`, `test/ai/backboardClient.test.ts`, `test/commands/scan.test.ts`, `test/ui/activity.test.ts`, `MEMORY.md`.
+- Functionality: The independent scan no longer sends `BACKBOARD_ASSISTANT_ID`; it stays stateless with Backboard memory and web search disabled, or accepts an opt-in `BACKBOARD_SCAN_ASSISTANT_ID` that the user has created without RAG documents/tools. `.env`/`.env.*` findings never offer AI patch generation because removal from Git is the correct remediation. Generated patches must be exact evidence replacements or empty. Scan/review activity output now uses the Custos lavender shimmer and completion color; error output remains red.
+- Imports/dependencies: Reused `accentHex` from `src/ui/theme.ts`; no dependency changes.
+- Verification: `npm run typecheck`, `npm run lint`, focused Backboard/scan/activity tests (35 tests), `npm run build`, and the full suite outside the sandbox all passed (17 files, 101 tests). The first sandboxed full-suite attempt failed only because `tsx` subprocess tests cannot bind their temporary IPC socket there (`EPERM`); the unrestricted rerun passed.
+- Follow-ups: When configuring `BACKBOARD_SCAN_ASSISTANT_ID`, create a dedicated Backboard assistant without documents, skills, or tools; leave it unset to use the stateless default scan path.
+
+## 2026-07-26 — Harden live Backboard review and restore AI finding details
+
+- Summary: Fixed the live Backboard schema fallback, restored per-finding AI enrichment, and corrected patch eligibility for `.env.example` templates.
+- Affected files: `src/ai/schemas.ts`, `src/ai/backboardClient.ts`, `src/commands/scan.ts`, `src/scanner/types.ts`, `test/ai/backboardClient.test.ts`, `test/commands/scan.test.ts`, `MEMORY.md`.
+- Functionality: The response schema now normalizes common model variations (`issues`/`security_findings`, casing, category aliases, omitted confidence) and reports only Zod field-path diagnostics on a genuine mismatch. Local rule findings receive bounded, redacted Backboard explanation enrichment before the independent review; technical details now show assessed risk and exploitability. The single Backboard activity indicator covers both stages. Actual `.env` files remain non-patchable, while `.env.example` templates again offer AI patch generation. Generated replacements are rejected unless they match the original evidence line count and assignment key.
+- Imports/dependencies: Added existing `zod` runtime type import and reused the local secret redactor; no dependency changes.
+- Verification: `npm run typecheck`, `npm run lint`, `npm run build`, focused tests (3 files, 37 tests), and the full suite outside the sandbox all passed (17 files, 103 tests). Ran the built CLI against the configured Backboard environment in JSON mode: Backboard completed, returned two findings, and both carried AI/hybrid metadata. No credentials or source contents were printed.
+- Follow-ups: Continue to keep external responses bounded and redacted in diagnostics.

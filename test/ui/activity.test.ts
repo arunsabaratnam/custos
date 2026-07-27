@@ -25,7 +25,7 @@ describe("shimmerColor", () => {
     expect(atHead).toEqual([255, 255, 255]);
   });
 
-  it("fades toward gold as distance from the head grows", () => {
+  it("fades toward lavender as distance from the head grows", () => {
     const near = shimmerColor(4, 5, 10);
     const far = shimmerColor(0, 5, 10);
     expect(brightness(shimmerColor(5, 5, 10))).toBeGreaterThan(brightness(near));

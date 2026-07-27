@@ -99,6 +99,12 @@ let originalPrePushStdinFile: string | undefined;
 let originalAllowOverride: string | undefined;
 let originalAuth0Domain: string | undefined;
 let originalAuth0ClientId: string | undefined;
+let originalBackboardApiKey: string | undefined;
+let originalAiScan: string | undefined;
+let originalAiRequired: string | undefined;
+let originalAiBlockOn: string | undefined;
+let originalAiMinConfidence: string | undefined;
+let originalAiPatches: string | undefined;
 let logSpy: ReturnType<typeof vi.spyOn>;
 let errorSpy: ReturnType<typeof vi.spyOn>;
 
@@ -109,10 +115,22 @@ beforeEach(async () => {
   originalAllowOverride = process.env.CUSTOS_ALLOW_OVERRIDE;
   originalAuth0Domain = process.env.AUTH0_DOMAIN;
   originalAuth0ClientId = process.env.AUTH0_CLIENT_ID;
+  originalBackboardApiKey = process.env.BACKBOARD_API_KEY;
+  originalAiScan = process.env.CUSTOS_AI_SCAN;
+  originalAiRequired = process.env.CUSTOS_AI_REQUIRED;
+  originalAiBlockOn = process.env.CUSTOS_AI_BLOCK_ON;
+  originalAiMinConfidence = process.env.CUSTOS_AI_MIN_CONFIDENCE;
+  originalAiPatches = process.env.CUSTOS_AI_PATCHES;
   delete process.env.CUSTOS_PRE_PUSH_STDIN_FILE;
   delete process.env.CUSTOS_ALLOW_OVERRIDE;
   delete process.env.AUTH0_DOMAIN;
   delete process.env.AUTH0_CLIENT_ID;
+  delete process.env.BACKBOARD_API_KEY;
+  delete process.env.CUSTOS_AI_SCAN;
+  delete process.env.CUSTOS_AI_REQUIRED;
+  delete process.env.CUSTOS_AI_BLOCK_ON;
+  delete process.env.CUSTOS_AI_MIN_CONFIDENCE;
+  delete process.env.CUSTOS_AI_PATCHES;
   Object.defineProperty(process, "stdin", {
     configurable: true,
     value: { isTTY: true },
@@ -160,12 +178,24 @@ afterEach(async () => {
   } else {
     process.env.AUTH0_CLIENT_ID = originalAuth0ClientId;
   }
+  restoreEnv("BACKBOARD_API_KEY", originalBackboardApiKey);
+  restoreEnv("CUSTOS_AI_SCAN", originalAiScan);
+  restoreEnv("CUSTOS_AI_REQUIRED", originalAiRequired);
+  restoreEnv("CUSTOS_AI_BLOCK_ON", originalAiBlockOn);
+  restoreEnv("CUSTOS_AI_MIN_CONFIDENCE", originalAiMinConfidence);
+  restoreEnv("CUSTOS_AI_PATCHES", originalAiPatches);
   process.exitCode = undefined;
+  vi.unstubAllGlobals();
   vi.resetAllMocks();
   logSpy.mockRestore();
   errorSpy.mockRestore();
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
 
 describe("runScan — no findings / warnings", () => {
   it("exits 0 with no changes to scan", async () => {
@@ -209,6 +239,49 @@ describe("runScan — no findings / warnings", () => {
     expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "finding_detected", action: "allowed" }));
   });
 
+  it("adds a grounded Backboard finding even when deterministic rules find nothing", async () => {
+    process.env.BACKBOARD_API_KEY = "test-key";
+    process.env.CUSTOS_AI_SCAN = "true";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({
+          content: JSON.stringify({
+            findings: [
+              {
+                severity: "critical",
+                category: "secret",
+                title: "Hardcoded API key",
+                file: "src/server.ts",
+                line: 2,
+                evidence: 'const OPENAI_API_KEY = "[REDACTED]";',
+                explanation: "The key would be exposed in repository history.",
+                recommendation: "Load the key from the environment and rotate it.",
+                confidence: 0.98,
+                exploitability: "high",
+                trustBoundary: "source control",
+              },
+            ],
+          }),
+        }),
+      })) as unknown as typeof fetch,
+    );
+    vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
+    vi.mocked(scanDiff).mockReturnValue([]);
+    vi.mocked(promptFindingAction).mockResolvedValue("abort");
+
+    await runScan({});
+
+    expect(process.exitCode).toBe(1);
+    expect(promptFindingAction).toHaveBeenCalled();
+    expect(writeAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "finding_detected", finding: expect.objectContaining({ source: "ai" }) }),
+    );
+  });
+
   it("--json emits findings and blocks (exit 1) when a blocking finding exists", async () => {
     vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
     vi.mocked(scanDiff).mockReturnValue([makeFinding({ severity: "critical" })]);
@@ -222,6 +295,53 @@ describe("runScan — no findings / warnings", () => {
 });
 
 describe("runScan — blocking finding action menu", () => {
+  it("does not offer an AI patch for a tracked .env file", async () => {
+    process.env.BACKBOARD_API_KEY = "test-key";
+    process.env.CUSTOS_AI_SCAN = "false";
+    process.env.CUSTOS_AI_PATCHES = "true";
+    vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
+    vi.mocked(scanDiff).mockReturnValue([
+      makeFinding({
+        id: "dotenv-committed",
+        severity: "high",
+        title: ".env file with secrets is being committed",
+        file: ".env",
+      }),
+    ]);
+    vi.mocked(promptFindingAction).mockResolvedValue("abort");
+
+    await runScan({});
+
+    expect(promptFindingAction).toHaveBeenCalledWith({ hasPatch: false, mode: "manual", allowOverride: false });
+  });
+
+  it("offers an AI patch for a tracked .env.example template", async () => {
+    process.env.BACKBOARD_API_KEY = "test-key";
+    process.env.CUSTOS_AI_SCAN = "false";
+    process.env.CUSTOS_AI_PATCHES = "true";
+    vi.mocked(getDiff).mockResolvedValue(`diff --git a/.env.example b/.env.example
+index abc1234..def5678 100644
+--- a/.env.example
++++ b/.env.example
+@@ -0,0 +1 @@
++AUTH0_CLIENT_ID=example-secret
+`);
+    vi.mocked(scanDiff).mockReturnValue([
+      makeFinding({
+        id: "dotenv-committed",
+        severity: "high",
+        title: ".env file with secrets is being committed",
+        file: ".env.example",
+        evidence: "AUTH0_CLIENT_ID=example-secret",
+      }),
+    ]);
+    vi.mocked(promptFindingAction).mockResolvedValue("abort");
+
+    await runScan({});
+
+    expect(promptFindingAction).toHaveBeenCalledWith({ hasPatch: true, mode: "manual", allowOverride: false });
+  });
+
   it("blocks the push when the user aborts", async () => {
     vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
     vi.mocked(scanDiff).mockReturnValue([makeFinding()]);

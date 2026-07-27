@@ -1,9 +1,10 @@
 import chalk from "chalk";
+import { accentHex } from "./theme.js";
 
 /**
  * Terminal "activity" animations — the shimmering, phase-aware progress
  * indicator used across Custos. Inspired by agentic CLIs (e.g. Claude Code):
- * a present-continuous verb that changes as real work happens, a gold→white
+ * a present-continuous verb that changes as real work happens, a lavender→white
  * shimmer sweeping across it, live detail counts, and a sparkle-settle when
  * the step completes.
  *
@@ -24,7 +25,7 @@ export type Activity = {
   fail(label?: string): Promise<void>;
 };
 
-const GOLD: [number, number, number] = [255, 189, 46];
+const LAVENDER: [number, number, number] = hexToRgb(accentHex);
 const WHITE: [number, number, number] = [255, 255, 255];
 const SHIMMER_WIDTH = 3;
 const FRAME_MS = 80;
@@ -43,15 +44,28 @@ function lerp(a: number, b: number, t: number): number {
   return Math.round(a + (b - a) * t);
 }
 
+function hexToRgb(hex: string): [number, number, number] {
+  const value = hex.replace("#", "");
+  return [
+    Number.parseInt(value.slice(0, 2), 16),
+    Number.parseInt(value.slice(2, 4), 16),
+    Number.parseInt(value.slice(4, 6), 16),
+  ];
+}
+
 /**
  * Pure: the rgb a character should take given its index and the current
- * shimmer head position. Brightest (white) at the head, fading to gold with
+ * shimmer head position. Brightest (white) at the head, fading to lavender with
  * distance. Exported for unit testing.
  */
 export function shimmerColor(charIndex: number, headPos: number, _len: number): [number, number, number] {
   const distance = Math.abs(charIndex - headPos);
   const t = Math.max(0, 1 - distance / SHIMMER_WIDTH);
-  return [lerp(GOLD[0], WHITE[0], t), lerp(GOLD[1], WHITE[1], t), lerp(GOLD[2], WHITE[2], t)];
+  return [
+    lerp(LAVENDER[0], WHITE[0], t),
+    lerp(LAVENDER[1], WHITE[1], t),
+    lerp(LAVENDER[2], WHITE[2], t),
+  ];
 }
 
 // --- cursor hygiene ---------------------------------------------------------
@@ -121,7 +135,7 @@ class AnimatedActivity implements Activity {
         return chalk.rgb(r, g, b)(ch);
       })
       .join("");
-    const pulse = this.frame % 8 < 4 ? chalk.rgb(...WHITE) : chalk.rgb(...GOLD);
+    const pulse = this.frame % 8 < 4 ? chalk.rgb(...WHITE) : chalk.rgb(...LAVENDER);
     const detail = this.detailText ? chalk.dim(` · ${this.detailText}`) : "";
     writeLine(` ${pulse(this.accent)}  ${colored}${detail}`);
   }
@@ -164,10 +178,10 @@ class AnimatedActivity implements Activity {
       // Sparkle flourish, then collapse into the final check.
       const sparkles = ["✦ ✧ ✦", "✧ ✦ ✧", "· ✦ ·", "✦ · ✦"];
       for (const s of sparkles) {
-        writeLine(` ${chalk.rgb(...GOLD)(s)}`);
+        writeLine(` ${chalk.rgb(...LAVENDER)(s)}`);
         await delay(70);
       }
-      writeLine(` ${chalk.green("✓")}  ${chalk.green(label ?? this.verb)}\n`);
+      writeLine(` ${chalk.hex(accentHex)("✓")}  ${chalk.hex(accentHex)(label ?? this.verb)}\n`);
     } else {
       writeLine(` ${chalk.red("✗")}  ${chalk.red(label ?? this.verb)}\n`);
     }
@@ -194,7 +208,7 @@ class StaticActivity implements Activity {
   async succeed(label?: string): Promise<void> {
     if (this.done) return;
     this.done = true;
-    process.stderr.write(`${chalk.green("✓")} ${label ?? this.verb}\n`);
+    process.stderr.write(`${chalk.hex(accentHex)("✓")} ${chalk.hex(accentHex)(label ?? this.verb)}\n`);
   }
 
   async fail(label?: string): Promise<void> {
