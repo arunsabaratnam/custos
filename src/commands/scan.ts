@@ -3,7 +3,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import tty from "node:tty";
 import chalk from "chalk";
-import { execa } from "execa";
 import { getDiff } from "../git/getDiff.js";
 import { parseDiff } from "../git/parseDiff.js";
 import { buildScanContext, readAiScanLimits } from "../context/buildScanContext.js";
@@ -196,7 +195,6 @@ export async function runScan(options: ScanOptions): Promise<void> {
     const blockedTarget = prePush ? "this push" : "this scan";
     console.log(chalk.red.bold(`\nCustos blocked ${blockedTarget}. ${blocking.length} issue(s) require action.\n`));
 
-    const commitSha = await getCommitSha();
     const interactive = await ensureInteractiveInput(prePush);
 
     if (!interactive) {
@@ -216,7 +214,7 @@ export async function runScan(options: ScanOptions): Promise<void> {
       return;
     }
 
-    await resolveBlockingFindings(blocking, hunks, config, commitSha, prePush);
+    await resolveBlockingFindings(blocking, hunks, config, prePush);
   } catch (err) {
     // Hook must never crash unhandled — log and exit 1 to block push safely.
     console.error(chalk.red("\n[custos] Unexpected error:"), (err as Error).message);
@@ -233,13 +231,12 @@ async function resolveBlockingFindings(
   blocking: Finding[],
   hunks: DiffHunk[],
   config: EffectiveConfig,
-  commitSha: string | undefined,
   prePush: boolean,
 ): Promise<void> {
   const mode = prePush ? "pre-push" : "manual";
 
   if (blocking.length === 1) {
-    await resolveFindingActions(blocking[0]!, blocking, hunks, config, commitSha, prePush, false);
+    await resolveFindingActions(blocking[0]!, blocking, hunks, config, prePush, false);
     return;
   }
 
@@ -254,7 +251,7 @@ async function resolveBlockingFindings(
       return;
     }
 
-    const result = await resolveFindingActions(blocking[selected]!, blocking, hunks, config, commitSha, prePush, true);
+    const result = await resolveFindingActions(blocking[selected]!, blocking, hunks, config, prePush, true);
     if (result === "terminal") {
       return;
     }
@@ -266,7 +263,6 @@ async function resolveFindingActions(
   allBlocking: Finding[],
   hunks: DiffHunk[],
   config: EffectiveConfig,
-  commitSha: string | undefined,
   prePush: boolean,
   showBack: boolean,
 ): Promise<"terminal" | "back"> {
@@ -305,7 +301,7 @@ async function resolveFindingActions(
     }
 
     if (action === "override") {
-      await handleOverride(finding, config, commitSha);
+      await handleOverride(finding, config);
       return "terminal";
     }
   }
@@ -415,7 +411,7 @@ async function handleApplyPatch(
   }
 
   try {
-    await applyPatch(finding.file, finding.evidence, patch, config.repoRoot);
+    await applyPatch(finding.file, finding.rawEvidence ?? finding.evidence, patch, config.repoRoot);
   } catch (err) {
     console.log(chalk.yellow(`\nCould not apply patch automatically: ${(err as Error).message}`));
     console.log(chalk.yellow("Manual fix required:"));
@@ -446,7 +442,6 @@ async function handleApplyPatch(
 async function handleOverride(
   finding: Finding,
   config: EffectiveConfig,
-  commitSha: string | undefined,
 ): Promise<void> {
   if (!config.allowOverride) {
     await promptOutro(chalk.red("Auth0 override is not enabled or configured. Push blocked."));
@@ -454,7 +449,7 @@ async function handleOverride(
     return;
   }
 
-  const { promptConfirm, promptOverrideReason } = await import("../ui/prompts.js");
+  const { promptOverrideReason } = await import("../ui/prompts.js");
   const reason = await promptOverrideReason();
   if (!reason) {
     await promptOutro(chalk.red("Override cancelled."));
@@ -462,7 +457,7 @@ async function handleOverride(
     return;
   }
 
-  const override = await tryOverride(finding, reason, commitSha);
+  const override = await tryOverride();
 
   if (!override.success) {
     await tryWriteAudit(config.auditEnabled, {
@@ -488,15 +483,9 @@ async function handleOverride(
   });
 
   if (!audited) {
-    const proceedUnlogged = await promptConfirm(
-      "Audit write failed — this override will not be logged. Continue anyway?",
-      false,
-    );
-    if (!proceedUnlogged) {
-      await promptOutro(chalk.red("Override cancelled — push blocked (audit log required)."));
-      process.exitCode = 1;
-      return;
-    }
+    await promptOutro(chalk.red("Override cancelled — push blocked (audit log required)."));
+    process.exitCode = 1;
+    return;
   }
 
   await promptOutro(
@@ -709,9 +698,10 @@ async function tryGeneratePatch(finding: Finding, hunk: DiffHunk): Promise<strin
 /** Reject patches that cannot be a direct replacement for the matched evidence. */
 function isSafeGeneratedPatch(finding: Finding, patch: string): boolean {
   if (!patch || patch.includes("```")) return false;
-  if (patch.split("\n").length !== finding.evidence.split("\n").length) return false;
+  const original = finding.rawEvidence ?? finding.evidence;
+  if (patch.split("\n").length !== original.split("\n").length) return false;
 
-  const sourceKey = finding.evidence.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/)?.[1];
+  const sourceKey = original.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/)?.[1];
   const patchKey = patch.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/)?.[1];
   return !sourceKey || sourceKey === patchKey;
 }
@@ -723,24 +713,15 @@ function isBlockingFinding(finding: Finding, config: EffectiveConfig): boolean {
   return config.blockOn.includes(finding.severity);
 }
 
-async function tryOverride(
-  finding: Finding,
-  reason: string,
-  commitSha: string | undefined,
-): Promise<{
+async function tryOverride(): Promise<{
   success: boolean;
   claims: Record<string, unknown>;
   userEmail?: string;
-  context?: Record<string, unknown>;
 }> {
-  let findingContext: Record<string, unknown> | undefined;
   try {
-    const { buildFindingContext } = await import("../auth/claimsBuilder.js");
     const { requestDeviceCode, pollForToken } = await import("../auth/deviceFlow.js");
 
-    const context = buildFindingContext(finding, commitSha, reason);
-    findingContext = context;
-    const deviceCode = await requestDeviceCode(context);
+    const deviceCode = await requestDeviceCode();
 
     console.log("");
     console.log(chalk.bold("Verify your identity to override this finding."));
@@ -765,12 +746,8 @@ async function tryOverride(
       const email = String(result.claims["email"] ?? result.claims["https://custos/email"] ?? "");
       return {
         success: true,
-        // Merge the finding context under the token claims so the audit
-        // record always names the exact finding, even if Auth0 strips the
-        // custom params from the issued token.
-        claims: { ...findingContext, ...result.claims },
+        claims: result.claims,
         userEmail: email || undefined,
-        context: findingContext,
       };
     } catch (err) {
       await waiter.stop("Verification failed.", false);
@@ -778,16 +755,7 @@ async function tryOverride(
     }
   } catch (err) {
     console.error(chalk.red(`[custos] Override failed: ${(err as Error).message}`));
-    return { success: false, claims: {}, context: findingContext };
-  }
-}
-
-async function getCommitSha(): Promise<string | undefined> {
-  try {
-    const { stdout } = await execa("git", ["rev-parse", "HEAD"]);
-    return stdout.trim().slice(0, 7);
-  } catch {
-    return undefined;
+    return { success: false, claims: {} };
   }
 }
 
@@ -808,6 +776,10 @@ async function applyPatch(
   repoRoot: string | null,
 ): Promise<void> {
   const targetPath = resolveSafeFilePath(file, repoRoot);
+  const fileStat = await fs.lstat(targetPath);
+  if (fileStat.isSymbolicLink()) {
+    throw new Error(`Refusing to patch symbolic link: ${file}`);
+  }
   const content = await fs.readFile(targetPath, "utf8");
   const evidenceTrimmed = evidence.trim();
 

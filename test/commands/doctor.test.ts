@@ -14,7 +14,12 @@ vi.mock("../../src/commands/repoState.js", () => ({
   readRepoConfig: vi.fn(async () => null),
 }));
 
+vi.mock("../../src/audit/mongo.js", () => ({
+  connectMongo: vi.fn(async () => ({})),
+}));
+
 const { readRepoConfig } = await import("../../src/commands/repoState.js");
+const { connectMongo } = await import("../../src/audit/mongo.js");
 const { runDoctor } = await import("../../src/commands/doctor.js");
 
 const ORIGINAL_ENV = process.env;
@@ -28,6 +33,8 @@ beforeEach(() => {
   delete process.env.AUTH0_CLIENT_ID;
   delete process.env.AUTH0_AUDIENCE;
   delete process.env.AUTH0_CLIENT_SECRET;
+  delete process.env.MONGODB_URI;
+  delete process.env.CUSTOS_AUDIT_ENABLED;
   process.exitCode = undefined;
   logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 });
@@ -120,5 +127,27 @@ describe("runDoctor", () => {
     expect(process.exitCode).toBe(0);
     expect(output).toContain("AUTH0_AUDIENCE");
     expect(output).toContain("configured");
+  });
+
+  it("tests the configured MongoDB connection", async () => {
+    process.env.MONGODB_URI = "mongodb://example.test/custos";
+
+    await runDoctor();
+
+    const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+    expect(connectMongo).toHaveBeenCalledOnce();
+    expect(output).toContain("MongoDB connection");
+    expect(output).toContain("connected");
+  });
+
+  it("fails doctor when configured MongoDB cannot be reached", async () => {
+    process.env.MONGODB_URI = "mongodb://example.test/custos";
+    vi.mocked(connectMongo).mockRejectedValueOnce(new Error("unreachable"));
+
+    await runDoctor();
+
+    const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+    expect(process.exitCode).toBe(1);
+    expect(output).toContain("connection failed");
   });
 });

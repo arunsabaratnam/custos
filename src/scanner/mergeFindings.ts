@@ -25,7 +25,7 @@ export function mergeFindings(
     }
 
     const existing = merged[matchingIndex]!;
-    merged[matchingIndex] = {
+    const hybrid: Finding = {
       ...existing,
       severity: higherSeverity(existing.severity, aiFinding.severity),
       explanation: aiFinding.explanation,
@@ -39,9 +39,15 @@ export function mergeFindings(
         isExploitable: candidate.exploitability !== "unknown",
       },
     };
+    preserveRawEvidence(hybrid, existing.rawEvidence);
+    merged[matchingIndex] = hybrid;
   }
 
   return merged;
+}
+
+function preserveRawEvidence(finding: Finding, rawEvidence: string | undefined): void {
+  if (rawEvidence) Object.defineProperty(finding, "rawEvidence", { value: rawEvidence, writable: true });
 }
 
 function toFinding(candidate: AiScanFinding, minConfidence: number): Finding {

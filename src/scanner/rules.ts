@@ -11,6 +11,7 @@
  * evidence and lets the developer decide. We still avoid obvious noise
  * (e.g. values already sourced from process.env).
  */
+import { redactSecrets } from "../context/buildScanContext.js";
 import type { DiffHunk, Finding, Severity } from "./types.js";
 
 export type Rule = (hunk: DiffHunk) => Finding | null;
@@ -38,19 +39,22 @@ function makeFinding(
     patch?: string;
   },
 ): Finding {
-  return {
+  const finding: Finding = {
     id: fields.id,
     severity: fields.severity,
     category: fields.category,
     title: fields.title,
     file: hunk.file,
     line: matched.line,
-    evidence: matched.content.trim(),
+    evidence: redactSecrets(matched.content.trim()),
     explanation: fields.explanation,
     recommendation: fields.recommendation,
     patch: fields.patch,
     source: "rule",
   };
+  // Keep raw text off every rendered, serialized, and audited Finding.
+  Object.defineProperty(finding, "rawEvidence", { value: matched.content.trim(), writable: true });
+  return finding;
 }
 
 /**

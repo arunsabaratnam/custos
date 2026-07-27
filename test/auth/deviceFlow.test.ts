@@ -1,6 +1,7 @@
+import { createSign, generateKeyPairSync, type KeyObject } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { requestDeviceCode } = await import("../../src/auth/deviceFlow.js");
+const { requestDeviceCode, verifyIdToken } = await import("../../src/auth/deviceFlow.js");
 
 const ORIGINAL_ENV = process.env;
 
@@ -16,13 +17,7 @@ describe("requestDeviceCode", () => {
     delete process.env.AUTH0_CLIENT_ID;
 
     await expect(
-      requestDeviceCode({
-        "https://custos/finding_id": "finding-1",
-        "https://custos/severity": "critical",
-        "https://custos/rule": "hardcoded-api-key",
-        "https://custos/file": "src/server.ts",
-        "https://custos/override_reason": "test",
-      }),
+      requestDeviceCode(),
     ).rejects.toThrow("AUTH0_DOMAIN and AUTH0_CLIENT_ID must be set to override with Auth0");
   });
 
@@ -48,19 +43,11 @@ describe("requestDeviceCode", () => {
       }),
     );
 
-    await requestDeviceCode({
-      "https://custos/finding_id": "finding-1",
-      "https://custos/severity": "critical",
-      "https://custos/rule": "hardcoded-api-key",
-      "https://custos/file": "src/server.ts",
-      "https://custos/override_reason": "test",
-    });
+    await requestDeviceCode();
 
     expect(String(requestBody)).toContain("client_id=client-id");
     expect(String(requestBody)).toContain("scope=openid+profile+email");
     expect(String(requestBody)).toContain("audience=https%3A%2F%2Fapi.example.com");
-    expect(String(requestBody)).not.toContain("custos");
-    expect(String(requestBody)).not.toContain("finding-1");
   });
 
   it("explains how to fix a missing Auth0 Device Code grant", async () => {
@@ -84,13 +71,45 @@ describe("requestDeviceCode", () => {
     );
 
     await expect(
-      requestDeviceCode({
-        "https://custos/finding_id": "finding-1",
-        "https://custos/severity": "critical",
-        "https://custos/rule": "hardcoded-api-key",
-        "https://custos/file": "src/server.ts",
-        "https://custos/override_reason": "test",
-      }),
+      requestDeviceCode(),
     ).rejects.toThrow("enable Device Code");
   });
 });
+
+describe("verifyIdToken", () => {
+  it("accepts a valid Auth0-issued RSA ID token", async () => {
+    process.env = { ...ORIGINAL_ENV, AUTH0_DOMAIN: "example.auth0.com", AUTH0_CLIENT_ID: "client-id" };
+    const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const kid = "test-key";
+    const token = signJwt(
+      { alg: "RS256", kid, typ: "JWT" },
+      { iss: "https://example.auth0.com/", aud: "client-id", exp: Math.floor(Date.now() / 1_000) + 60, email: "dev@example.com" },
+      privateKey,
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ keys: [{ ...publicKey.export({ format: "jwk" }), kid, use: "sig", alg: "RS256" }] })));
+
+    await expect(verifyIdToken(token)).resolves.toMatchObject({ email: "dev@example.com" });
+  });
+
+  it("rejects a token with a bad signature", async () => {
+    process.env = { ...ORIGINAL_ENV, AUTH0_DOMAIN: "example.auth0.com", AUTH0_CLIENT_ID: "client-id" };
+    const trusted = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const attacker = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const kid = "test-key";
+    const token = signJwt(
+      { alg: "RS256", kid, typ: "JWT" },
+      { iss: "https://example.auth0.com/", aud: "client-id", exp: Math.floor(Date.now() / 1_000) + 60 },
+      attacker.privateKey,
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ keys: [{ ...trusted.publicKey.export({ format: "jwk" }), kid, use: "sig", alg: "RS256" }] })));
+
+    await expect(verifyIdToken(token)).rejects.toThrow("verification failed");
+  });
+});
+
+function signJwt(header: Record<string, unknown>, payload: Record<string, unknown>, privateKey: KeyObject): string {
+  const input = `${Buffer.from(JSON.stringify(header)).toString("base64url")}.${Buffer.from(JSON.stringify(payload)).toString("base64url")}`;
+  const signer = createSign("RSA-SHA256");
+  signer.update(input);
+  return `${input}.${signer.sign(privateKey).toString("base64url")}`;
+}

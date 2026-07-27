@@ -1,4 +1,4 @@
-# Custos
+# Custos ₍⸍⸌̣ʷ̣̫⸍̣⸌₎ﾉ🔒
 
 Custos is a terminal-native CLI tool that brings extreme shift-left security to solo developers and small teams.
 
@@ -15,11 +15,12 @@ In the age of agentic coding, risky changes can slip in fast. Custos runs in you
 
 - Scans outgoing Git diffs locally before push.
 - Detects security issues in changed lines with deterministic rules.
+- Runs a bounded Backboard AI security review alongside deterministic rules, then merges grounded results.
 - Explains why each finding matters and what to do next.
 - Offers an interactive action flow for patching, details, overrides, and exit.
 - Supports multi-issue navigation so the developer can choose which finding to analyze.
 - Writes structured audit events to MongoDB Atlas.
-- Optionally gates push overrides through Auth0 Device Authorization Flow.
+- Gates enabled push overrides through Auth0 Device Authorization Flow and a verified ID token.
 
 ## Screenshots
 
@@ -54,7 +55,7 @@ git push
   -> pre-push hook
   -> custos scan --pre-push
   -> outgoing diff
-  -> local scanner rules
+  -> deterministic scanner rules + bounded AI review
   -> terminal finding UI
   -> patch, details, Auth0 override, or abort
   -> MongoDB audit log
@@ -110,11 +111,12 @@ CUSTOS_ALLOW_OVERRIDE=false
 BACKBOARD_API_KEY=
 BACKBOARD_BASE_URL=https://app.backboard.io/api
 # Optional: a dedicated Backboard assistant with no attached documents or tools.
-# BACKBOARD_ASSISTANT_ID is deliberately not used for structured security scans.
 BACKBOARD_SCAN_ASSISTANT_ID=
 ```
 
 Do not commit real `.env` files or secrets.
+
+The AI scan sends only changed lines, limited nearby context, and a small dependency-manifest excerpt. Sensitive files such as `.env` and key files are excluded; recognizable secret values are redacted. AI-only findings must be grounded in supplied evidence, meet the configured confidence threshold, and default to blocking only at `critical` severity. Set `CUSTOS_AI_REQUIRED=true` when a failed AI review should block pre-push scans.
 
 ## Auth0 Overrides
 
@@ -124,11 +126,11 @@ If a developer selects `Force override with Auth0`, Custos:
 
 1. Prompts for an override reason.
 2. Starts Auth0 Device Authorization Flow.
-3. Waits for identity verification.
-4. Writes the override decision and token claims into the MongoDB audit log.
-5. Allows the push only after the override succeeds.
+3. Verifies the ID token signature, issuer, audience, expiration, and signing key against the Auth0 tenant JWKS.
+4. Writes the finding, reason, verified identity claims, and decision into MongoDB Atlas.
+5. Allows the push only after the override and audit write both succeed.
 
-The CLI Device Authorization Flow uses `AUTH0_DOMAIN` and `AUTH0_CLIENT_ID`. It does not use `AUTH0_CLIENT_SECRET`.
+The CLI Device Authorization Flow uses `AUTH0_DOMAIN` and `AUTH0_CLIENT_ID`. It does not use `AUTH0_CLIENT_SECRET`. Auth0's Device Authorization endpoint does not accept custom finding metadata, so the exact finding context is stored in the Custos audit record alongside the verified Auth0 identity rather than represented as a custom signed JWT claim.
 
 ## MongoDB Audit Log
 
@@ -164,15 +166,12 @@ npm run dev -- audit
 npm run dev -- doctor
 ```
 
-## Future Updates
+## Next Steps
 
-- Integrate Backboard.io AI functionality for smarter scan explanations and patch generation.
-- Add additional authentication methods for overrides, including cross-platform devices, 2FA, and alternate identity providers.
-- Expand scanner rules for dependency risk, package typosquatting, prompt-injection sinks, unsafe CORS, and dangerous shell execution.
-- Add richer Auth0 override claims so signed tokens can include finding, file, commit, and override context.
-- Strengthen MongoDB audit filtering by repo, branch, user, severity, action, and time range.
-- Add optional MCP support so terminal agents can inspect Custos findings and audit history.
-- Improve package distribution so teams can install Custos without local linking.
+- Add audit filters for repo, branch, user, severity, action, and time range.
+- Add package typo-squatting detection and broader dependency analysis.
+- Package Custos for installation without local linking.
+- Add MCP support for terminal agents to inspect findings and audit history.
 
 ## Acknowledgements
 

@@ -1,5 +1,6 @@
 import { execa } from "execa";
 import chalk from "chalk";
+import { connectMongo } from "../audit/mongo.js";
 import { readRepoConfig, resolveRepoState } from "./repoState.js";
 import { accent } from "../ui/theme.js";
 
@@ -40,12 +41,14 @@ export async function runDoctor(): Promise<void> {
     }
   }
 
-  renderCheck(
-    "MongoDB audit",
-    process.env.CUSTOS_AUDIT_ENABLED !== "false",
-    process.env.CUSTOS_AUDIT_ENABLED === "false" ? "disabled" : "enabled",
-  );
-  renderCheck("MONGODB_URI", Boolean(process.env.MONGODB_URI), process.env.MONGODB_URI ? "configured" : "not configured");
+  const auditEnabled = process.env.CUSTOS_AUDIT_ENABLED !== "false";
+  const mongoConfigured = Boolean(process.env.MONGODB_URI);
+  renderCheck("MongoDB audit", auditEnabled, auditEnabled ? "enabled" : "disabled");
+  renderCheck("MONGODB_URI", mongoConfigured, mongoConfigured ? "configured" : "not configured");
+  const mongoReachable = auditEnabled && mongoConfigured ? await checkMongoConnection() : null;
+  if (mongoReachable !== null) {
+    renderCheck("MongoDB connection", mongoReachable, mongoReachable ? "connected" : "connection failed");
+  }
   renderCheck(
     "Backboard AI",
     Boolean(process.env.BACKBOARD_API_KEY),
@@ -54,10 +57,19 @@ export async function runDoctor(): Promise<void> {
 
   if (authEnabled && (!authDomain || !authClientId)) {
     process.exitCode = 1;
-  } else if (!gitVersion) {
+  } else if (!gitVersion || mongoReachable === false) {
     process.exitCode = 1;
   } else {
     process.exitCode = 0;
+  }
+}
+
+async function checkMongoConnection(): Promise<boolean> {
+  try {
+    await connectMongo();
+    return true;
+  } catch {
+    return false;
   }
 }
 

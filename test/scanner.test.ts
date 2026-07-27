@@ -30,6 +30,8 @@ describe("scanner rules", () => {
     expect(finding!.category).toBe("secret");
     expect(finding!.line).toBe(12);
     expect(finding!.patch).toBe("const OPENAI_API_KEY = process.env.OPENAI_API_KEY;");
+    expect(JSON.stringify(finding)).not.toContain("sk-demo-leaked-key");
+    expect(finding!.rawEvidence).toContain("sk-demo-leaked-key");
   });
 
   it("flags SQL string concatenation with user input and parameterizes it", () => {

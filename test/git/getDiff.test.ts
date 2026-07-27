@@ -132,4 +132,12 @@ describe("getDiff", () => {
 
     expect(diff).toContain("a.txt");
   });
+
+  it("fails closed when a requested pushed range cannot be extracted", async () => {
+    const remoteSha = "1".repeat(40);
+    const localSha = "2".repeat(40);
+    const stdin = `refs/heads/main ${localSha} refs/heads/main ${remoteSha}\n`;
+
+    await expect(getDiff(stdin)).rejects.toThrow("Could not extract the outgoing Git diff");
+  });
 });

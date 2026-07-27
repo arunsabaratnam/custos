@@ -16,7 +16,10 @@ export type Finding = {
   title: string;
   file: string;
   line?: number;
+  /** Sanitized evidence suitable for terminal, JSON, and audit output. */
   evidence: string;
+  /** Local-only original text used solely for an exact patch replacement. Never enumerable. */
+  rawEvidence?: string;
   explanation: string;
   recommendation: string;
   patch?: string;

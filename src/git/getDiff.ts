@@ -3,6 +3,7 @@ import { execa } from "execa";
 // Empty tree SHA — used to diff against nothing for brand-new branches
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const ZERO_SHA = /^0+$/;
+const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
 
 export type RefUpdate = {
   localRef: string;
@@ -28,6 +29,7 @@ export function parseRefLines(stdin: string): RefUpdate[] {
       const parts = line.split(/\s+/);
       if (parts.length < 4) return null;
       const [localRef, localSha, remoteRef, remoteSha] = parts as [string, string, string, string];
+      if (!SHA.test(localSha) || !SHA.test(remoteSha)) return null;
       return { localRef, localSha, remoteRef, remoteSha };
     })
     .filter((ref): ref is RefUpdate => ref !== null);
@@ -65,7 +67,11 @@ export async function getDiff(stdin?: string): Promise<string> {
       try {
         const { stdout } = await execa("git", ["diff", "--unified=3", range]);
         if (stdout) diffs.push(stdout);
-      } catch {}
+      } catch {
+        // Treating an extraction error as an empty diff would permit an
+        // unscanned push. In hook mode, fail closed instead.
+        throw new Error("Could not extract the outgoing Git diff; push blocked to avoid an unscanned change.");
+      }
     }
 
     if (diffs.length > 0) return diffs.join("\n");

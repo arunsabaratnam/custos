@@ -30,10 +30,6 @@ vi.mock("../../src/audit/writeAudit.js", () => ({
   listAuditEvents: vi.fn(async () => []),
 }));
 
-vi.mock("../../src/auth/claimsBuilder.js", () => ({
-  buildFindingContext: vi.fn(() => ({})),
-}));
-
 vi.mock("../../src/auth/deviceFlow.js", () => ({
   requestDeviceCode: vi.fn(async () => ({
     device_code: "device-1",
@@ -629,33 +625,18 @@ describe("runScan — Auth0 override", () => {
     expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "override_denied" }));
   });
 
-  it("blocks the push when the audit write fails and the user declines to continue unlogged", async () => {
+  it("blocks the push when the audit write fails", async () => {
     vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
     vi.mocked(scanDiff).mockReturnValue([makeFinding()]);
     vi.mocked(promptFindingAction).mockResolvedValue("override");
     vi.mocked(promptOverrideReason).mockResolvedValue("hotfix");
     vi.mocked(pollForToken).mockResolvedValue({ accessToken: "token", claims: {} });
     vi.mocked(writeAuditEvent).mockRejectedValue(new Error("Mongo unavailable"));
-    vi.mocked(promptConfirm).mockResolvedValue(false);
 
     await runScan({ prePush: true });
 
     expect(process.exitCode).toBe(1);
-    expect(promptConfirm).toHaveBeenCalledWith(expect.stringContaining("will not be logged"), false);
-  });
-
-  it("allows the push when the audit write fails but the user confirms continuing unlogged", async () => {
-    vi.mocked(getDiff).mockResolvedValue(SAMPLE_DIFF);
-    vi.mocked(scanDiff).mockReturnValue([makeFinding()]);
-    vi.mocked(promptFindingAction).mockResolvedValue("override");
-    vi.mocked(promptOverrideReason).mockResolvedValue("hotfix");
-    vi.mocked(pollForToken).mockResolvedValue({ accessToken: "token", claims: {} });
-    vi.mocked(writeAuditEvent).mockRejectedValue(new Error("Mongo unavailable"));
-    vi.mocked(promptConfirm).mockResolvedValue(true);
-
-    await runScan({ prePush: true });
-
-    expect(process.exitCode).toBe(0);
+    expect(promptConfirm).not.toHaveBeenCalled();
   });
 });
 

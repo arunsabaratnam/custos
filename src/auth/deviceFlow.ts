@@ -1,4 +1,4 @@
-import type { FindingContext } from "./claimsBuilder.js";
+import { createPublicKey, verify, type JsonWebKey } from "node:crypto";
 
 export type DeviceCodeResponse = {
   device_code: string;
@@ -30,10 +30,10 @@ function requireEnv(): { domain: string; clientId: string; audience?: string } {
  * Starts the Auth0 Device Authorization Flow.
  *
  * Auth0's device-code endpoint only supports client_id, scope, and audience.
- * Finding context is therefore kept in Custos' Mongo audit record instead of
- * being sent to Auth0 as unsupported request parameters.
+ * The finding and override reason remain in the Custos audit event, paired
+ * with verified Auth0 identity claims.
  */
-export async function requestDeviceCode(_findingContext: FindingContext): Promise<DeviceCodeResponse> {
+export async function requestDeviceCode(): Promise<DeviceCodeResponse> {
   const { domain, clientId, audience } = requireEnv();
 
   const form = new URLSearchParams();
@@ -93,10 +93,10 @@ export async function pollForToken(deviceCode: string, interval: number): Promis
     if (res.ok && typeof payload.access_token === "string") {
       const accessToken = payload.access_token;
       const idToken = typeof payload.id_token === "string" ? payload.id_token : undefined;
-      // Prefer the id_token for identity claims (email/name); fall back to
-      // the access token (a JWT only when an API audience is configured).
-      const claims = decodeJwtClaims(idToken) ?? decodeJwtClaims(accessToken) ?? {};
-      return { accessToken, claims };
+      if (!idToken) {
+        throw new Error("Auth0 did not return an ID token; verified identity is required for an override");
+      }
+      return { accessToken, claims: await verifyIdToken(idToken) };
     }
 
     const error = String(payload.error ?? "");
@@ -118,22 +118,65 @@ export async function pollForToken(deviceCode: string, interval: number): Promis
 }
 
 /**
- * Decodes the payload segment of a JWT without verifying its signature.
- * Safe here because the token was just fetched directly from Auth0 over
- * TLS — we only need to read the claims, not establish trust. Returns null
- * for opaque (non-JWT) tokens.
+ * Verifies Auth0 identity claims through the tenant's JWKS before accepting
+ * an override. Restricting this to Auth0's RSA algorithms keeps the verifier
+ * compact and uses only Node's built-in crypto primitives.
  */
-function decodeJwtClaims(token: string | undefined): Record<string, unknown> | null {
-  if (!token) return null;
+export async function verifyIdToken(token: string): Promise<Record<string, unknown>> {
+  const { domain, clientId } = requireEnv();
   const parts = token.split(".");
-  if (parts.length !== 3) return null;
+  if (parts.length !== 3) throw new Error("Auth0 returned an invalid ID token");
+
   try {
-    const json = Buffer.from(parts[1]!, "base64url").toString("utf8");
-    const parsed = JSON.parse(json);
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+    const header = decodeJsonSegment(parts[0]!);
+    const claims = decodeJsonSegment(parts[1]!);
+    const alg = header.alg;
+    const kid = header.kid;
+    if (typeof alg !== "string" || !["RS256", "RS384", "RS512"].includes(alg) || typeof kid !== "string") {
+      throw new Error("Auth0 ID token uses an unsupported signing algorithm");
+    }
+
+    validateClaims(claims, domain, clientId);
+    const jwks = await fetchJwks(domain);
+    const jwk = jwks.find((key) => key.kid === kid);
+    if (!jwk) throw new Error("Auth0 signing key was not found in the tenant JWKS");
+
+    const algorithm = { RS256: "RSA-SHA256", RS384: "RSA-SHA384", RS512: "RSA-SHA512" }[alg]!;
+    const key = createPublicKey({ key: jwk, format: "jwk" });
+    const isValid = verify(
+      algorithm,
+      Buffer.from(`${parts[0]}.${parts[1]}`),
+      key,
+      Buffer.from(parts[2]!, "base64url"),
+    );
+    if (!isValid) throw new Error("Auth0 ID token signature verification failed");
+    return claims;
   } catch {
-    return null;
+    throw new Error("Auth0 ID token verification failed");
   }
+}
+
+function decodeJsonSegment(segment: string): Record<string, unknown> {
+  const parsed = JSON.parse(Buffer.from(segment, "base64url").toString("utf8"));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid JWT JSON");
+  return parsed as Record<string, unknown>;
+}
+
+function validateClaims(claims: Record<string, unknown>, domain: string, clientId: string): void {
+  if (claims.iss !== `https://${domain}/`) throw new Error("unexpected Auth0 token issuer");
+  const audience = claims.aud;
+  const hasAudience = audience === clientId || (Array.isArray(audience) && audience.includes(clientId));
+  if (!hasAudience) throw new Error("unexpected Auth0 token audience");
+  if (typeof claims.exp !== "number" || claims.exp * 1_000 <= Date.now()) throw new Error("expired Auth0 ID token");
+  if (typeof claims.nbf === "number" && claims.nbf * 1_000 > Date.now()) throw new Error("Auth0 ID token is not active yet");
+}
+
+async function fetchJwks(domain: string): Promise<Array<JsonWebKey & { kid?: string }>> {
+  const response = await fetch(`https://${domain}/.well-known/jwks.json`);
+  if (!response.ok) throw new Error(`could not fetch Auth0 JWKS (${response.status})`);
+  const payload = (await response.json()) as { keys?: unknown };
+  if (!Array.isArray(payload.keys)) throw new Error("Auth0 JWKS response is invalid");
+  return payload.keys.filter((key): key is JsonWebKey & { kid?: string } => Boolean(key) && typeof key === "object");
 }
 
 function delay(ms: number): Promise<void> {
